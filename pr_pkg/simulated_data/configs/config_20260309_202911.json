@@ -1,0 +1,102 @@
+{
+  "input": {
+    "fs": 8000000.0,
+    "f_c": 700000000.0,
+    "N": 500000,
+    "seed": null,
+    "use_simulated_data": true
+  },
+  "simulation": {
+    "reference_scale": 1.0,
+    "transmitter_position": [
+      0.0,
+      0.0
+    ],
+    "radar_position": [
+      70.0,
+      150.0
+    ],
+    "clutter": {
+      "N_CLUTT": 20,
+      "clutter_rcs_min_db": 0.0,
+      "clutter_rcs_max_db": 0.0,
+      "rand_clutter": true,
+      "clutter_positions": null,
+      "clutter_limits": [
+        -10,
+        500,
+        5,
+        150
+      ]
+    },
+    "echo": {
+      "V_b": [
+        10.0,
+        100.0
+      ],
+      "target_rcs_db": -3.0,
+      "add_noise": false,
+      "noise_power_db": 10.0,
+      "rand_target": false,
+      "target_position": [
+        20.0,
+        220.0
+      ],
+      "target_limits": [
+        0,
+        500,
+        40,
+        220
+      ]
+    }
+  },
+  "window": {
+    "enabled": true,
+    "beta": [
+      14.0,
+      14.0
+    ],
+    "freq": true,
+    "range": false
+  },
+  "filter": {
+    "enabled": true,
+    "order": 30
+  },
+  "caf": {
+    "batch": 200
+  },
+  "cfar": {
+    "enabled": true,
+    "Nw": 512,
+    "Ng": 8,
+    "P_fa": 1e-06,
+    "return_intermediate": true
+  },
+  "plot": {
+    "show": true,
+    "save": false,
+    "db": true,
+    "figsize": [
+      9,
+      6
+    ],
+    "cmap": "viridis",
+    "aspect": "auto",
+    "xlim": [
+      -1.0,
+      1.0
+    ],
+    "ylim": [
+      1000.0,
+      0.0
+    ],
+    "marker": "o",
+    "color": "r",
+    "markersize": 8
+  },
+  "io": {
+    "output_root": null,
+    "figure_format": "png"
+  }
+}
