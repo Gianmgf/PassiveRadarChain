@@ -1,3 +1,6 @@
 __pycache__
 *.egg-info
 *.npy
+*.npz
+.json
+.png
