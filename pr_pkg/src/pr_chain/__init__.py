@@ -1,6 +1,7 @@
 from .utils import constants, math, plotting
 from .processing import compute_caf, block_lattice_filter, ca_cfar_1d, apply_w
 from .generators import ClutterGenerator, EchoGenerator
+from .core import PassiveRadarChain
 
 __all__ = [
     "utils",
@@ -8,9 +9,9 @@ __all__ = [
     "block_lattice_filter",
     "ca_cfar_1d",
     "apply_w",
-    "block_lattice_filter",
     "ClutterGenerator",
     "EchoGenerator",
+    "PassiveRadarChain",
     "constants",
     "math",
     "plotting",
