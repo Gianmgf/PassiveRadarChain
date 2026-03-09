@@ -1,6 +1,7 @@
 from __future__ import annotations
 import numpy as np
-from ..utils import from_dB, C
+from ..utils.math import from_db
+from ..utils.constants import C
 
 
 class EchoGenerator:
@@ -83,7 +84,7 @@ class EchoGenerator:
         # Noise and echo generation
 
         echo = np.zeros_like(reference_signal)
-        echo_power = np.sqrt(from_dB(self.target_rcs_db))
+        echo_power = np.sqrt(from_db(self.target_rcs_db))
 
         echo = (
             np.concatenate(
@@ -106,7 +107,7 @@ class EchoGenerator:
         )
 
         if self.add_noise:
-            noise_power = from_dB(self.noise_power_db)
+            noise_power = from_db(self.noise_power_db)
             noise = np.sqrt(noise_power / 2) * (
                 np.random.randn(len(reference_signal))
                 + 1j * np.random.randn(len(reference_signal))

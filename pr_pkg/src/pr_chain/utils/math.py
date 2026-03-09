@@ -1,13 +1,11 @@
 import numpy as np
 
-C = 3e8
 
-
-def to_dB(x):
+def to_db(x):
     return 10 * np.log10(x)
 
 
-def from_dB(x):
+def from_db(x):
     return 10 ** (x / 10)
 
 
@@ -27,7 +25,7 @@ def awgn(signal: np.ndarray, snr_db: float) -> np.ndarray:
         Señal con ruido agregado.
     """
     signal_power = np.mean(np.abs(signal) ** 2)
-    snr_linear = from_dB(snr_db)
+    snr_linear = from_db(snr_db)
     noise_power = signal_power / snr_linear
 
     noise = np.sqrt(noise_power / 2) * (
