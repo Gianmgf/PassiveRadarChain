@@ -1,6 +1,7 @@
 from __future__ import annotations
 import numpy as np
-from ..utils import from_dB, C
+from ..utils.math import from_db
+from ..utils.constants import C
 
 
 class ClutterGenerator:
@@ -83,7 +84,7 @@ class ClutterGenerator:
             Complex baseband clutter signal.
         """
         clutter_rcs = np.sqrt(
-            from_dB(
+            from_db(
                 np.random.uniform(
                     self.clutter_rcs_min_db, self.clutter_rcs_max_db, self.N_CLUTT
                 )

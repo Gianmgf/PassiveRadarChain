@@ -12,7 +12,7 @@ from .. import utils
 from scipy import fft
 
 # Velocidad de la luz [m/s]
-C = utils.C
+C = utils.constants.C
 
 
 def compute_caf(batch, fs, surveillance, reference):
