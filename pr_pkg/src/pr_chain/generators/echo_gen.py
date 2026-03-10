@@ -15,8 +15,6 @@ class EchoGenerator:
         f_c: float = 20e9,
         V_b: np.ndarray = None,
         target_rcs_db: float = 0,
-        add_noise: bool = True,
-        noise_power_db: float = 10,
         rand_target: bool = True,
         target_position: np.ndarray = None,
         target_limits: np.ndarray = np.array([0, 500, 40, 220]),
@@ -26,8 +24,6 @@ class EchoGenerator:
 
         self.fs = fs
         self.f_c = f_c
-        self.noise_power_db = noise_power_db
-        self.add_noise = add_noise
         self.target_rcs_db = target_rcs_db
 
         if V_b is None:
@@ -81,8 +77,6 @@ class EchoGenerator:
         )
         f_doppler = -v_b / wavelength
 
-        # Noise and echo generation
-
         echo = np.zeros_like(reference_signal)
         echo_power = np.sqrt(from_db(self.target_rcs_db))
 
@@ -106,15 +100,7 @@ class EchoGenerator:
             * echo_power
         )
 
-        if self.add_noise:
-            noise_power = from_db(self.noise_power_db)
-            noise = np.sqrt(noise_power / 2) * (
-                np.random.randn(len(reference_signal))
-                + 1j * np.random.randn(len(reference_signal))
-            )
-            return echo + noise, f_doppler
-        else:
-            return echo, f_doppler
+        return echo, f_doppler
 
     def target_position(self) -> np.ndarray:
         return self.target_position, self.target_sample_delay * C / self.fs

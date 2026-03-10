@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from pr_chain.core import (
+from pr_chain.core.configs import (
     CAFConfig,
     CFARConfig,
     ClutterConfig,
@@ -17,6 +17,7 @@ from pr_chain.core import (
     PlotConfig,
     SimulationConfig,
     WindowConfig,
+    ChannelConfig,
 )
 
 
@@ -48,12 +49,12 @@ def build_example_config(
             ),
             echo=EchoConfig(
                 V_b=[10.0, 100.0],
-                add_noise=False,
                 rand_target=False,
                 target_rcs_db=-3.0,
                 target_position=[20.0, 220.0],
             ),
         ),
+        channel=ChannelConfig(enable=True, add_noise=False),
         filter=FilterConfig(enabled=True, order=30),
         window=WindowConfig(enabled=True, beta=(14.0, 14.0), freq=True, range=False),
         caf=CAFConfig(batch=200),

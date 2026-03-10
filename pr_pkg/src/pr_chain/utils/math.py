@@ -9,7 +9,9 @@ def from_db(x):
     return 10 ** (x / 10)
 
 
-def awgn(signal: np.ndarray, snr_db: float) -> np.ndarray:
+def awgn(
+    signal: np.ndarray, noise_power_db: float, return_noise: bool = False
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """Agrega ruido blanco gaussiano a una señal dada un SNR en dB.
 
     Parameters
@@ -24,11 +26,13 @@ def awgn(signal: np.ndarray, snr_db: float) -> np.ndarray:
     np.ndarray
         Señal con ruido agregado.
     """
-    signal_power = np.mean(np.abs(signal) ** 2)
-    snr_linear = from_db(snr_db)
-    noise_power = signal_power / snr_linear
+
+    noise_power = from_db(noise_power_db)
 
     noise = np.sqrt(noise_power / 2) * (
         np.random.randn(*signal.shape) + 1j * np.random.randn(*signal.shape)
     )
-    return signal + noise
+    if return_noise:
+        return signal + noise, noise
+    else:
+        return signal + noise

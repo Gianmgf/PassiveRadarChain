@@ -39,7 +39,7 @@ def apply_w(
         ref_w = ref_w * window_freq
     if range:
         window_range = kaiser(N, beta_range)
-        window_range = fftshift(window_range)
+        # window_range = fftshift(window_range)
         ref_w = ifft(fft(ref_w) * window_range)
 
     return ref_w
