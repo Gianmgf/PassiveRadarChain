@@ -37,7 +37,6 @@ def apply_noise_and_channel(
             ref_out = np.convolve(ref_out, h, mode="same")
 
     if add_noise:
-        surv_out = awgn(surv_out, noise_power_db)
-        ref
+        surv_out, noise = awgn(surv_out, noise_power_db, True)
 
-    return surv_out, ref_out
+    return surv_out, ref_out, noise

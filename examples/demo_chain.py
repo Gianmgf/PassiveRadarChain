@@ -1,16 +1,8 @@
-"""Notebook-style demo for the PassiveRadarChain class.
-
-This script mirrors the uploaded notebook flow using the new stateful class:
-1. simulate reference/surveillance data,
-2. compute a raw CAF,
-3. apply clutter filtering and reference windowing,
-4. rerun CAF and CFAR,
-5. overlay detections.
-"""
-
 from __future__ import annotations
-
+import numpy as np
+import matplotlib.pyplot as plt
 from pr_chain import PassiveRadarChain
+from pr_chain import utils
 from pr_chain.core.configs import (
     CAFConfig,
     CFARConfig,
@@ -25,86 +17,141 @@ from pr_chain.core.configs import (
     ChannelConfig,
 )
 
-N_samples = 5_000_000
+N_SAMPELS = 1_000_000
+INCLUDE_ISDBT = True
 
 
-def build_notebook_like_config() -> PassiveRadarChainConfig:
+def build_config() -> PassiveRadarChainConfig:
     """Build a configuration that closely matches the uploaded notebook."""
     return PassiveRadarChainConfig(
         input=InputConfig(
-            N=N_samples, fs=8126984.0, f_c=700e6, seed=None, use_simulated_data=True
+            N=N_SAMPELS, fs=8126984.0, f_c=700e6, seed=None, use_simulated_data=True
         ),
         simulation=SimulationConfig(
             transmitter_position=[0.0, 0.0],
-            radar_position=[70.0, 150.0],
+            radar_position=[50.0, 500.0],
+            direct_signal=True,
             clutter=ClutterConfig(
-                N_CLUTT=20,
+                N_CLUTT=10,
                 clutter_rcs_min_db=0.0,
                 clutter_rcs_max_db=0.0,
                 rand_clutter=True,
-                clutter_limits=[-10, 500, 5, 150],
+                clutter_limits=[-100, 2000, 5, 150],
             ),
             echo=EchoConfig(
                 V_b=[10.0, 100.0],
                 rand_target=False,
-                target_rcs_db=-6.0,
-                target_position=[20.0, 220.0],
+                target_rcs_db=-10.0,
+                target_position=[2500.0, 120.0],
             ),
         ),
-        channel=ChannelConfig(enable=True, add_noise=True, noise_power_db=20.0),
+        channel=ChannelConfig(enable=True, add_noise=True, noise_power_db=1.0),
         filter=FilterConfig(enabled=False, order=30),
-        window=WindowConfig(enabled=False, beta=(50.0, 50.0), freq=True, range=True),
-        caf=CAFConfig(batch=200),
+        window=WindowConfig(enabled=False, beta=(15.0, 10.0), freq=True, range=True),
+        caf=CAFConfig(batch=500),
         cfar=CFARConfig(
-            enabled=True, Nw=512, Ng=8, P_fa=1e-6, return_intermediate=True
+            enabled=True,
+            bidimensional=True,
+            Nw=256,
+            Ng=16,
+            P_fa=1e-6,
+            return_intermediate=True,
         ),
         plot=PlotConfig(
-            show=False,
+            show=True,
             save=True,
             db=True,
             cmap="viridis",
             aspect="auto",
-            xlim=(-0.2, 0.6),
-            ylim=(800.0, 0.0),
+            xlim=(-4.2, 4.2),
+            ylim=(19000, 0.0),
         ),
     )
 
 
 def main() -> None:
-    """Run the notebook-style demo using the chain class."""
-    chain = PassiveRadarChain(config=build_notebook_like_config(), verbose=True)
+    chain = PassiveRadarChain(config=build_config(), verbose=True)
 
-    # Raw CAF (equivalent to notebook cells 1-3).
-    # reference = np.load("isdbt_signal.npy")
-    # reference = reference[0:N_samples]
-    # chain.simulate_inputs(reference=reference)
+    if INCLUDE_ISDBT:
+        isdbt = np.load("isdbt_signal.npy")
+        isdbt = isdbt[0:N_SAMPELS]
+        E = np.mean(np.abs(isdbt) ** 2)
+        N_o = E / utils.math.from_db(13)
+        chain.update_channel_config(noise_power_db=N_o)
+        chain.simulate_inputs(isdbt)
 
     chain.run_until("caf")
-    chain.plot_caf(filename="demo_raw_caf.png", title="Raw CAF")
+    _, ax1 = chain.plot_caf(filename="caf_isdbt2.png", title="CAF")
+    ax1.set_xlabel("kHz")
+    ax1.set_ylabel("m")
 
-    # Filtered CAF without windowing (notebook cell 4-5, first branch).
-    chain.update_filter_config(enabled=True, order=30)
+    chain.update_filter_config(enabled=True, order=100)
     chain.run_from("filter")
-    chain.plot_caf(
-        filename="demo_filtered_caf.png",
+    _, ax2 = chain.plot_caf(
+        filename="filtered_caf_isdbt2.png",
         title="CAF after block lattice filtering (Without windowing)",
     )
+    ax2.set_xlabel("kHz")
+    ax2.set_ylabel("m")
 
-    # Filtered CAF with windowing and detections (notebook cells 4-7, second branch).
-    chain.update_window_config(enabled=True, beta=(50.0, 50.0), freq=True, range=False)
+    chain.update_window_config(enabled=True, beta=(10.0, 10.0), freq=True, range=True)
     chain.run_from("window")
-    chain.plot_caf(
-        filename="demo_filtered_windowed_caf.png",
-        title="CAF after block lattice filtering (With windowing)",
+    _, ax3 = chain.plot_caf(
+        filename="filtered_w_caf_isdbt2.png",
+        title="CAF con cf (windowing)",
     )
-    chain.run_detection()
-    chain.plot_detections(
-        filename="demo_filtered_windowed_detections.png",
-        title="Filtered + Windowed CAF with Detections",
+    ax3.set_xlabel("kHz")
+    ax3.set_ylabel("m")
+
+    detection_state = chain.run_detection()
+    caf_state = chain.get_state().caf
+    _, ax4 = chain.plot_detections(
+        filename="filtered_w_detections_isdbt2.png",
+        title="CF + Windowed CAF Detections",
+    )
+    ax4.set_xlabel("kHz")
+    ax4.set_ylabel("m")
+
+    fig5, ax5 = utils.plot_caf(
+        detection_state.sigma_est,
+        caf_state.extent,
+    )
+    ax5.set_xlabel("kHz")
+    ax5.set_ylabel("m")
+    ax5.set_title(r"CA-CFAR $\hat{\sigma}$ [ m, k]")
+
+    fig6, ax6 = plt.subplots(figsize=(9, 9), ncols=2)
+    rows, cols = detection_state.detections
+
+    r_idx = rows[0]
+    f_idx = cols[0]
+
+    freq_cut = utils.math.to_db(np.abs(caf_state.caf[r_idx, :]))
+    freq_thr = utils.math.to_db(
+        detection_state.sigma_est[r_idx, :] * detection_state.alpha_det
     )
 
+    range_cut = utils.math.to_db(np.abs(caf_state.caf[:, f_idx]))
+    range_thr = utils.math.to_db(
+        detection_state.sigma_est[:, f_idx] * detection_state.alpha_det
+    )
+
+    ax6[0].plot(caf_state.freq_axis, freq_cut, label="CAF cut")
+    ax6[0].plot(caf_state.freq_axis, freq_thr, label="CFAR threshold")
+    ax6[0].set_title(f"Frequency cut at range bin {r_idx}")
+    ax6[0].set_xlabel("Frequency [Hz]")
+    ax6[0].set_ylabel("|CAF|[dB]")
+    ax6[0].legend()
+
+    ax6[1].plot(caf_state.range_axis, range_cut, label="CAF cut")
+    ax6[1].plot(caf_state.range_axis, range_thr, label="CFAR threshold")
+    ax6[1].set_title(f"Range cut at Doppler bin {f_idx}")
+    ax6[1].set_xlabel("Range [m]")
+    ax6[1].set_ylabel("|CAF|[dB]")
+    ax6[1].legend()
+    plt.show()
     # chain.save_config()
-    # chain.save_state()
+    # chain.save_state()  885
 
 
 if __name__ == "__main__":

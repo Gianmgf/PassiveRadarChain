@@ -8,7 +8,7 @@ Dependencias: numpy, scipy (scipy.ndimage.convolve)
 
 from __future__ import annotations
 import numpy as np
-from scipy.ndimage import convolve
+from scipy.ndimage import convolve, uniform_filter
 
 
 def ca_cfar_1d(
@@ -55,18 +55,34 @@ def ca_cfar_1d(
     if n_ref == 0:
         raise ValueError("No hay celdas de referencia (revisá Nw/Ng).")
 
-    # Convolución para promedio local de ruido (por fila en 2D)
-    if x.ndim == 1:
-        noise_sum = convolve(x.astype(float), kernel, mode="constant", cval=0.0)
-    else:
-        noise_sum = convolve(
-            x.astype(float), kernel[None, :], mode="constant", cval=0.0
-        )
+    noise_sum = convolve(x.astype(float), kernel[None, :], mode="constant", cval=0.0)
 
     sigma_est = noise_sum / n_ref
 
     # alpha para CA-CFAR (Richards): Pfa = (1 + alpha/N)^(-N) => alpha = N*(Pfa^(-1/N) - 1)
     alpha_det = float(n_ref * (pfa ** (-1.0 / n_ref) - 1.0))
+    threshold = sigma_est * alpha_det
+
+    detections = np.where(x > threshold)
+
+    if return_intermediate:
+        return detections, sigma_est, alpha_det
+    return detections
+
+
+def ca_cfar_2d(
+    caf: np.ndarray, Nw: int, Ng: int, pfa: float, return_intermediate: bool = False
+):
+    x = np.asarray(caf, dtype=np.float64)  # ideally power already
+
+    total_ng = (2 * Ng + 1) ** 2
+    total = (2 * (Nw + Ng) + 1) ** 2
+    total_nw = total - total_ng
+    result_ng = uniform_filter(x, 2 * Ng + 1, mode="constant", cval=0.0)
+    result_nw = uniform_filter(x, 2 * (Nw + Ng) + 1, mode="constant", cval=0.0)
+    sigma_est = result_nw * total / total_nw - result_ng * total_ng / total_nw
+
+    alpha_det = total_nw * (pfa ** (-1.0 / total_nw) - 1.0)
     threshold = sigma_est * alpha_det
 
     detections = np.where(x > threshold)
