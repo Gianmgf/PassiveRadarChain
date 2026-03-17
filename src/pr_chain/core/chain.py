@@ -17,6 +17,7 @@ from ..processing import (
     apply_w,
     block_lattice_filter,
     ca_cfar_1d,
+    ca_cfar_2d,
     compute_caf,
     apply_noise_and_channel,
 )
@@ -157,6 +158,7 @@ class ChannelState:
     applied: bool = False
     add_noise: bool = False
     noise_power_db: float | None = None
+    noise_added: np.ndarray | None = None
 
 
 @dataclass
@@ -527,7 +529,12 @@ class PassiveRadarChain:
 
             clutter = clutter_generator.generate(reference)
             echo, doppler_hz = echo_generator.generate(reference)
-            surveillance = np.asarray(clutter + echo, dtype=np.complex128)
+            if self.config.simulation.direct_signal:
+                surveillance = np.asarray(
+                    clutter + echo + reference, dtype=np.complex128
+                )
+            else:
+                surveillance = np.asarray(clutter + echo, dtype=np.complex128)
 
         self.state.inputs = InputState(
             reference=reference,
@@ -591,7 +598,7 @@ class PassiveRadarChain:
         )
 
         if self.config.channel.enable:
-            surv_ch, ref_ch = apply_noise_and_channel(
+            surv_ch, ref_ch, noise = apply_noise_and_channel(
                 surv=inputs.surveillance,
                 ref=inputs.reference,
                 add_noise=self.config.channel.add_noise,
@@ -612,6 +619,7 @@ class PassiveRadarChain:
                 if self.config.channel.add_noise
                 else None
             ),
+            noise_added=(noise if self.config.channel.add_noise else None),
         )
 
         self.state.completed_stages["channel"] = True
@@ -737,13 +745,22 @@ class PassiveRadarChain:
                 detections=None, sigma_est=None, alpha_det=None
             )
         else:
-            result = ca_cfar_1d(
-                np.abs(caf_state.caf),
-                Nw=self.config.cfar.Nw,
-                Ng=self.config.cfar.Ng,
-                pfa=self.config.cfar.P_fa,
-                return_intermediate=self.config.cfar.return_intermediate,
-            )
+            if not self.config.cfar.bidimensional:
+                result = ca_cfar_1d(
+                    np.abs(caf_state.caf),
+                    Nw=self.config.cfar.Nw,
+                    Ng=self.config.cfar.Ng,
+                    pfa=self.config.cfar.P_fa,
+                    return_intermediate=self.config.cfar.return_intermediate,
+                )
+            else:
+                result = ca_cfar_2d(
+                    np.abs(caf_state.caf),
+                    Nw=self.config.cfar.Nw,
+                    Ng=self.config.cfar.Ng,
+                    pfa=self.config.cfar.P_fa,
+                    return_intermediate=self.config.cfar.return_intermediate,
+                )
             if self.config.cfar.return_intermediate:
                 detections, sigma_est, alpha_det = result
                 self.state.detection = DetectionState(

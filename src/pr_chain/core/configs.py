@@ -95,6 +95,7 @@ class EchoConfig:
 class SimulationConfig:
     """Configuration for simulated-data generation and geometry."""
 
+    direct_signal: bool = True
     reference_scale: float = 1.0
     transmitter_position: np.ndarray = field(
         default_factory=lambda: np.array([0.0, 0.0])
@@ -167,6 +168,7 @@ class CFARConfig:
     """Configuration for CA-CFAR detection on the CAF magnitude."""
 
     enabled: bool = True
+    bidimensional: bool = False
     Nw: int = 512
     Ng: int = 8
     P_fa: float = 1e-6

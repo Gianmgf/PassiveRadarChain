@@ -107,7 +107,8 @@ def plot_caf(caf, extent, db=False, figsize=(9, 6), **imshow_kwargs):
     """
 
     fig, ax = plt.subplots(figsize=figsize)
-
+    if "aspect" not in imshow_kwargs:
+        imshow_kwargs["aspect"] = "auto"
     if db:
         caf_plot = to_db(np.abs(caf))
         label = "CAF (dB)"
