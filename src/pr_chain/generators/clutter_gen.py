@@ -5,8 +5,58 @@ from ..utils.constants import C
 
 
 class ClutterGenerator:
-    """
-    Generates a simulated clutter signal for a moving passive bistatic radar.
+    """Genera una señal de clutter simulada para un escenario de radar pasivo bistático.
+
+    La clase modela múltiples reflectores estacionarios distribuidos en posiciones
+    del plano. A partir de la geometría transmisor–clutter–receptor, calcula el
+    retardo bistático de cada reflector y construye la señal de clutter como la
+    suma de copias retardadas y escaladas de la señal de referencia.
+
+    Parameters
+    ----------
+    fs : float, optional
+        Frecuencia de muestreo en Hz. Por defecto es ``100e6``.
+    N_CLUTT : int, optional
+        Cantidad de reflectores de clutter a simular. Por defecto es ``15``.
+    clutter_rcs_min_db : float, optional
+        Valor mínimo de RCS del clutter en dB. Por defecto es ``-20``.
+    clutter_rcs_max_db : float, optional
+        Valor máximo de RCS del clutter en dB. Por defecto es ``1``.
+    rand_clutter : bool, optional
+        Si es ``True``, las posiciones de clutter se generan aleatoriamente
+        dentro de ``clutter_limits``. Si es ``False``, se usan las posiciones
+        dadas en ``clutter_positions``. Por defecto es ``True``.
+    clutter_positions : np.ndarray, optional
+        Posiciones de los reflectores de clutter con forma ``(N_CLUTT, 2)``.
+        Cada fila representa una posición ``[x, y]``. Solo se usa si
+        ``rand_clutter=False``.
+    clutter_limits : np.ndarray, optional
+        Límites espaciales para la generación aleatoria del clutter en el
+        formato ``[xmin, xmax, ymin, ymax]``. Por defecto es
+        ``np.array([0, 500, 40, 220])``.
+    Tx_position : np.ndarray, optional
+        Posición del transmisor en el plano, con formato ``[x, y]``.
+        Por defecto es ``[0.0, 0.0]``.
+    Rx_position : np.ndarray, optional
+        Posición del receptor en el plano, con formato ``[x, y]``.
+        Por defecto es ``[0.0, 0.0]``.
+
+    Raises
+    ------
+    ValueError
+        Si ``clutter_positions`` es provisto y su cantidad de filas no coincide
+        con ``N_CLUTT``.
+
+    Attributes
+    ----------
+    clutter_positions : np.ndarray
+        Posiciones finales de los reflectores de clutter.
+    clutter_sample_delays : np.ndarray
+        Retardos enteros, en muestras, asociados a cada reflector de clutter.
+    Tx_position : np.ndarray
+        Posición del transmisor.
+    Rx_position : np.ndarray
+        Posición del receptor.
     """
 
     def __init__(
@@ -65,23 +115,27 @@ class ClutterGenerator:
 
     def generate(self, reference_signal: np.ndarray) -> np.ndarray:
         """
-        Generate simulated clutter signal.
+        Genera la señal de clutter a partir de una señal de referencia.
+
+        Cada reflector de clutter se modela como una copia retardada y escalada de
+        la señal de referencia. La amplitud de cada contribución se obtiene a partir
+        de un valor de RCS aleatorio uniforme en dB entre ``clutter_rcs_min_db`` y
+        ``clutter_rcs_max_db``.
 
         Parameters
         ----------
         reference_signal : np.ndarray
-            Complex baseband reference signal.
-        fs : float
-            Sampling frequency in Hz.
-        clutter_sample_delays : np.ndarray
-            Integer delay samples for each clutter patch.
-        cos_clutter : np.ndarray
-            Cosine of the angle for each clutter patch.
+            Señal de referencia compleja en banda base.
 
         Returns
         -------
-        clutt : np.ndarray
-            Complex baseband clutter signal.
+        np.ndarray
+            Señal compleja de clutter con la misma forma que ``reference_signal``.
+
+        Notes
+        -----
+        Los retardos usados en la generación son enteros, ya que se obtienen
+        discretizando el retardo bistático en muestras.
         """
         clutter_rcs = np.sqrt(
             from_db(

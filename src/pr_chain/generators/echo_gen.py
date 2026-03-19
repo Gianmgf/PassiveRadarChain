@@ -5,8 +5,56 @@ from ..utils.constants import C
 
 
 class EchoGenerator:
-    """
-    Generates a simulated clutter signal for a moving passive bistatic radar.
+    """Genera una señal de eco simulada para un blanco móvil en un escenario
+    de radar pasivo bistático.
+
+    La clase modela un único blanco puntual en movimiento. A partir de la
+    geometría transmisor–blanco–receptor, calcula el retardo bistático del
+    eco y la frecuencia Doppler asociada a la velocidad bistática del blanco.
+    La señal de eco se construye como una copia retardada, modulada en fase
+    y escalada de la señal de referencia.
+
+    Parameters
+    ----------
+    fs : float, optional
+        Frecuencia de muestreo en Hz. Por defecto es ``100e6``.
+    f_c : float, optional
+        Frecuencia portadora en Hz. Por defecto es ``20e9``.
+    V_b : np.ndarray, optional
+        Vector velocidad del blanco en el plano, con formato ``[vx, vy]``.
+        Por defecto es ``[20.0, 10.0]``.
+    target_rcs_db : float, optional
+        Valor de RCS del blanco en dB. Por defecto es ``0``.
+    rand_target : bool, optional
+        Si es ``True``, la posición del blanco se genera aleatoriamente dentro
+        de ``target_limits``. Si es ``False``, se utiliza la posición dada en
+        ``target_position``. Por defecto es ``True``.
+    target_position : np.ndarray, optional
+        Posición del blanco en el plano, con formato ``[x, y]``. Solo se usa
+        si ``rand_target=False``.
+    target_limits : np.ndarray, optional
+        Límites espaciales para la generación aleatoria de la posición del
+        blanco, en el formato ``[xmin, xmax, ymin, ymax]``. Por defecto es
+        ``np.array([0, 500, 40, 220])``.
+    Tx_position : np.ndarray, optional
+        Posición del transmisor en el plano, con formato ``[x, y]``.
+        Por defecto es ``[0.0, 0.0]``.
+    Rx_position : np.ndarray, optional
+        Posición del receptor en el plano, con formato ``[x, y]``.
+        Por defecto es ``[0.0, 0.0]``.
+
+    Attributes
+    ----------
+    target_position : np.ndarray
+        Posición final del blanco.
+    target_sample_delay : int
+        Retardo entero, en muestras, asociado al trayecto bistático del eco.
+    V_b : np.ndarray
+        Velocidad del blanco en el plano.
+    Tx_position : np.ndarray
+        Posición del transmisor.
+    Rx_position : np.ndarray
+        Posición del receptor.
     """
 
     def __init__(
@@ -62,9 +110,34 @@ class EchoGenerator:
         self.target_sample_delay = self.target_sample_delay.astype(int)
 
     def generate(self, reference_signal: np.ndarray) -> np.ndarray:
+        """
+        Genera la señal de eco y la frecuencia Doppler del blanco a partir de
+        una señal de referencia.
+
+        Parameters
+        ----------
+        reference_signal : np.ndarray
+            Señal de referencia compleja en banda base.
+
+        Returns
+        -------
+        echo : np.ndarray
+            Señal compleja de eco con la misma forma que ``reference_signal``.
+        f_doppler : float
+            Frecuencia Doppler bistática del blanco en Hz.
+
+        Notes
+        -----
+        La señal de eco se modela como una copia retardada de la señal de
+        referencia, multiplicada por una exponencial compleja para introducir
+        el corrimiento Doppler y escalada según el valor de ``target_rcs_db``.
+
+        El retardo utilizado es entero, ya que se obtiene discretizando el
+        retardo bistático en muestras.
+        """
         wavelength = C / self.f_c
         N = len(reference_signal)
-        # Doppler shift and biestatic velocity calculation
+
         u_target_to_transmitter = self.Tx_position - self.target_position
         u_target_to_transmitter = u_target_to_transmitter / np.linalg.norm(
             u_target_to_transmitter

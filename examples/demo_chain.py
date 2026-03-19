@@ -33,29 +33,34 @@ def build_config() -> PassiveRadarChainConfig:
             direct_signal=True,
             clutter=ClutterConfig(
                 N_CLUTT=10,
-                clutter_rcs_min_db=0.0,
-                clutter_rcs_max_db=0.0,
+                clutter_rcs_min_db=-3.0,
+                clutter_rcs_max_db=-5.0,
                 rand_clutter=True,
                 clutter_limits=[-100, 2000, 5, 150],
             ),
             echo=EchoConfig(
                 V_b=[10.0, 100.0],
                 rand_target=False,
-                target_rcs_db=-10.0,
+                target_rcs_db=-5.0,
                 target_position=[2500.0, 120.0],
             ),
         ),
-        channel=ChannelConfig(enable=True, add_noise=True, noise_power_db=1.0),
-        filter=FilterConfig(enabled=False, order=30),
+        channel=ChannelConfig(
+            enable=True,
+            add_noise=True,
+            noise_on_both_channels=False,
+            noise_power_db=1.0,
+        ),
+        filter=FilterConfig(enabled=False, order=100),
         window=WindowConfig(enabled=False, beta=(15.0, 10.0), freq=True, range=True),
         caf=CAFConfig(batch=500),
         cfar=CFARConfig(
             enabled=True,
             bidimensional=True,
             Nw=256,
-            Ng=16,
-            P_fa=1e-6,
-            return_intermediate=True,
+            Ng=4,
+            P_fa=1e-5,
+            freq_wrap=False,
         ),
         plot=PlotConfig(
             show=True,
@@ -64,7 +69,7 @@ def build_config() -> PassiveRadarChainConfig:
             cmap="viridis",
             aspect="auto",
             xlim=(-4.2, 4.2),
-            ylim=(19000, 0.0),
+            ylim=(18400, 0.0),
         ),
     )
 
@@ -76,7 +81,7 @@ def main() -> None:
         isdbt = np.load("isdbt_signal.npy")
         isdbt = isdbt[0:N_SAMPELS]
         E = np.mean(np.abs(isdbt) ** 2)
-        N_o = E / utils.math.from_db(13)
+        N_o = E / utils.math.from_db(150)
         chain.update_channel_config(noise_power_db=N_o)
         chain.simulate_inputs(isdbt)
 
@@ -85,7 +90,7 @@ def main() -> None:
     ax1.set_xlabel("kHz")
     ax1.set_ylabel("m")
 
-    chain.update_filter_config(enabled=True, order=100)
+    chain.update_filter_config(enabled=True, order=200)
     chain.run_from("filter")
     _, ax2 = chain.plot_caf(
         filename="filtered_caf_isdbt2.png",
@@ -94,7 +99,7 @@ def main() -> None:
     ax2.set_xlabel("kHz")
     ax2.set_ylabel("m")
 
-    chain.update_window_config(enabled=True, beta=(10.0, 10.0), freq=True, range=True)
+    chain.update_window_config(enabled=True, beta=(5.0, 5.0), freq=True, range=True)
     chain.run_from("window")
     _, ax3 = chain.plot_caf(
         filename="filtered_w_caf_isdbt2.png",
@@ -104,7 +109,7 @@ def main() -> None:
     ax3.set_ylabel("m")
 
     detection_state = chain.run_detection()
-    caf_state = chain.get_state().caf
+    caf_state = chain.get_state("caf")
     _, ax4 = chain.plot_detections(
         filename="filtered_w_detections_isdbt2.png",
         title="CF + Windowed CAF Detections",

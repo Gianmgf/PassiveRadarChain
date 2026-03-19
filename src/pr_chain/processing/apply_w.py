@@ -10,19 +10,35 @@ def apply_w(
     freq: bool = False,
     range: bool = False,
 ) -> np.ndarray:
-    """Aplica ventana de Kaiser al vector de referencia para mejorar la resolución en el CAF.
+    """Aplica una ventana de Kaiser sobre la señal de referencia en frecuencia,
+    en rango, o en ambos dominios.
 
     Parameters
     ----------
     reference : np.ndarray
-        Vector de referencia (1D, complejo).
-    beta : float
-        Parámetro de forma para la ventana de Kaiser.
+        Vector de referencia unidimensional.
+    beta : float | tuple[float, float], optional
+        Parámetro de forma de la ventana de Kaiser. Si es un escalar, se usa
+        el mismo valor para las ventanas en frecuencia y en rango. Si es una
+        tupla de dos elementos, el primer valor se usa para frecuencia y el
+        segundo para rango. Por defecto es ``14.0``.
+    freq : bool, optional
+        Si es ``True``, aplica la ventana de Kaiser directamente en el dominio
+        temporal para reducir lóbulos laterales en frecuencia. Por defecto es
+        ``False``.
+    range : bool, optional
+        Si es ``True``, aplica la ventana de Kaiser en el dominio frecuencial
+        para modificar la respuesta en rango. Por defecto es ``False``.
 
     Returns
     -------
     np.ndarray
-        Vector de referencia con ventana aplicada.
+        Señal de referencia con el ventaneo aplicado.
+
+    Raises
+    ------
+    TypeError
+        Si ``beta`` no es un escalar ni una tupla de longitud 2.
     """
     if isinstance(beta, float):
         beta_freq = beta_range = beta

@@ -6,7 +6,8 @@ import numpy as np
 def _normalize_optional_array(
     value: Any, *, ndim: int | None = None
 ) -> np.ndarray | None:
-    """Convert optional sequence-like config values into NumPy arrays."""
+    """Convierte un valor opcional tipo secuencia en un arreglo de NumPy y,
+    si se indica, valida su cantidad de dimensiones."""
     if value is None:
         return None
     arr = np.asarray(value)
@@ -17,15 +18,20 @@ def _normalize_optional_array(
 
 @dataclass
 class ChannelConfig:
+    """Configuración de la etapa opcional de canal y ruido aplicada sobre las
+    señales de vigilancia y referencia."""
+
     enable: bool = False
     add_noise: bool = False
     noise_power_db: float = 0.0
     channel_respone: np.ndarray | None = None
+    noise_on_both_channels: bool = True
 
 
 @dataclass
 class InputConfig:
-    """Configuration for the input signals and top-level acquisition parameters."""
+    """Configuración de las señales de entrada y de los parámetros generales
+    de adquisición o simulación."""
 
     fs: float = 8e6
     f_c: float = 700e6
@@ -34,7 +40,7 @@ class InputConfig:
     use_simulated_data: bool = True
 
     def __post_init__(self) -> None:
-        """Validate input configuration values."""
+        """Valida los parámetros básicos de entrada."""
         if self.fs <= 0:
             raise ValueError(f"fs must be positive. Got {self.fs}.")
         if self.f_c <= 0:
@@ -45,7 +51,8 @@ class InputConfig:
 
 @dataclass
 class ClutterConfig:
-    """Configuration mirroring ``ClutterGenerator`` arguments."""
+    """Configuración del generador de clutter, incluyendo cantidad de
+    reflectores, niveles de RCS y geometría espacial."""
 
     N_CLUTT: int = 20
     clutter_rcs_min_db: float = 0.0
@@ -57,7 +64,7 @@ class ClutterConfig:
     )
 
     def __post_init__(self) -> None:
-        """Normalize clutter geometry arrays."""
+        """Normaliza y valida los arreglos asociados a la geometría del clutter."""
         self.clutter_positions = _normalize_optional_array(
             self.clutter_positions, ndim=2
         )
@@ -68,7 +75,8 @@ class ClutterConfig:
 
 @dataclass
 class EchoConfig:
-    """Configuration mirroring ``EchoGenerator`` arguments."""
+    """Configuración del generador de eco, incluyendo velocidad, RCS y
+    posición del blanco."""
 
     V_b: np.ndarray = field(default_factory=lambda: np.array([10.0, 100.0]))
     target_rcs_db: float = -3.0
@@ -79,7 +87,8 @@ class EchoConfig:
     )
 
     def __post_init__(self) -> None:
-        """Normalize target and velocity arrays."""
+        """Normaliza y valida los arreglos asociados a la velocidad y posición
+        del blanco."""
         self.V_b = np.asarray(self.V_b, dtype=float)
         self.target_position = np.asarray(self.target_position, dtype=float)
         self.target_limits = np.asarray(self.target_limits)
@@ -93,7 +102,8 @@ class EchoConfig:
 
 @dataclass
 class SimulationConfig:
-    """Configuration for simulated-data generation and geometry."""
+    """Configuración general de la simulación, incluyendo geometría del
+    escenario, señal directa y subconfiguraciones de clutter y eco."""
 
     direct_signal: bool = True
     reference_scale: float = 1.0
@@ -105,7 +115,7 @@ class SimulationConfig:
     echo: EchoConfig = field(default_factory=EchoConfig)
 
     def __post_init__(self) -> None:
-        """Normalize geometry arrays."""
+        """Normaliza y valida las posiciones del transmisor y del receptor."""
         self.transmitter_position = np.asarray(self.transmitter_position, dtype=float)
         self.radar_position = np.asarray(self.radar_position, dtype=float)
         if self.transmitter_position.shape != (2,):
@@ -121,7 +131,8 @@ class SimulationConfig:
 
 @dataclass
 class WindowConfig:
-    """Configuration for optional reference windowing before CAF computation."""
+    """Configuración del ventaneo opcional aplicado a la señal de referencia
+    antes del cálculo de la CAF."""
 
     enabled: bool = True
     beta: float | tuple[float, float] = (14.0, 14.0)
@@ -129,7 +140,7 @@ class WindowConfig:
     range: bool = False
 
     def __post_init__(self) -> None:
-        """Normalize the window beta parameter after JSON deserialization."""
+        """Normaliza el parámetro beta luego de la deserialización."""
         if isinstance(self.beta, list):
             if len(self.beta) != 2:
                 raise ValueError(
@@ -140,42 +151,44 @@ class WindowConfig:
 
 @dataclass
 class FilterConfig:
-    """Configuration for optional clutter filtering on the surveillance channel."""
+    """Configuración del filtro opcional de clutter aplicado sobre la señal
+    de vigilancia."""
 
     enabled: bool = True
     order: int = 30
 
     def __post_init__(self) -> None:
-        """Validate filter settings."""
+        """Valida los parámetros del filtro."""
         if self.order <= 0:
             raise ValueError(f"order must be positive. Got {self.order}.")
 
 
 @dataclass
 class CAFConfig:
-    """Configuration for the cross-ambiguity function computation."""
+    """Configuración del cálculo de la función de ambigüedad cruzada."""
 
     batch: int = 200
 
     def __post_init__(self) -> None:
-        """Validate CAF settings."""
+        """Valida los parámetros del cálculo de la CAF."""
         if self.batch <= 0:
             raise ValueError(f"batch must be positive. Got {self.batch}.")
 
 
 @dataclass
 class CFARConfig:
-    """Configuration for CA-CFAR detection on the CAF magnitude."""
+    """Configuración del detector CA-CFAR aplicado sobre la magnitud de la
+    CAF."""
 
     enabled: bool = True
     bidimensional: bool = False
     Nw: int = 512
     Ng: int = 8
     P_fa: float = 1e-6
-    return_intermediate: bool = True
+    freq_wrap: bool = True
 
     def __post_init__(self) -> None:
-        """Validate CFAR settings."""
+        """Valida los parámetros del detector CFAR."""
         if self.Nw <= 0:
             raise ValueError(f"Nw must be positive. Got {self.Nw}.")
         if self.Ng < 0:
@@ -186,7 +199,8 @@ class CFARConfig:
 
 @dataclass
 class PlotConfig:
-    """Configuration for visualization helpers."""
+    """Configuración de visualización para la generación de figuras y gráficos
+    de resultados."""
 
     show: bool = False
     save: bool = False
@@ -201,7 +215,7 @@ class PlotConfig:
     markersize: int = 8
 
     def __post_init__(self) -> None:
-        """Normalize tuple-like plot configuration values after deserialization."""
+        """Normaliza los parámetros de graficado luego de la deserialización."""
         if isinstance(self.figsize, list):
             self.figsize = tuple(self.figsize)
         if isinstance(self.xlim, list):
@@ -212,7 +226,8 @@ class PlotConfig:
 
 @dataclass
 class IOConfig:
-    """Configuration for saving configs, states, and figures."""
+    """Configuración de entrada/salida para el guardado de configuraciones,
+    estados y figuras."""
 
     output_root: str | None = None
     figure_format: str = "png"
@@ -220,7 +235,8 @@ class IOConfig:
 
 @dataclass
 class PassiveRadarChainConfig:
-    """Top-level configuration for ``PassiveRadarChain``."""
+    """Configuración principal de la cadena de procesamiento, que agrupa todas
+    las subconfiguraciones del sistema."""
 
     input: InputConfig = field(default_factory=InputConfig)
     channel: ChannelConfig = field(default_factory=ChannelConfig)
