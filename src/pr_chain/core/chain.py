@@ -16,8 +16,7 @@ from ..generators import ClutterGenerator, EchoGenerator
 from ..processing import (
     apply_w,
     block_lattice_filter,
-    ca_cfar_1d,
-    ca_cfar_2d,
+    ca_cfar,
     compute_caf,
     apply_noise_and_channel,
 )
@@ -42,7 +41,7 @@ StageName = Literal["inputs", "channel", "filter", "window", "caf", "detect"]
 
 
 def _jsonify(value: Any) -> Any:
-    """Convert nested Python/NumPy objects into JSON-serializable objects."""
+    """Convierte objetos anidados de Python/NumPy en estructuras serializables a JSON."""
     if isinstance(value, np.ndarray):
         return value.tolist()
     if isinstance(value, Path):
@@ -62,7 +61,7 @@ def _jsonify(value: Any) -> Any:
 
 @contextmanager
 def _temporary_seed(seed: int | None):
-    """Temporarily seed NumPy's global RNG and restore its previous state on exit."""
+    """Fija temporalmente la semilla global de NumPy y restaura el estado previo del generador finalizar."""
     if seed is None:
         yield
         return
@@ -78,7 +77,7 @@ def _temporary_seed(seed: int | None):
 def _as_complex_1d(
     signal: np.ndarray | list[complex] | tuple[complex, ...], name: str
 ) -> np.ndarray:
-    """Validate and convert an input signal into a 1D complex NumPy array."""
+    """Valida que la señal sea un arreglo unidimensional no vacío y la convierte a un arreglo complejo de NumPy."""
     arr = np.asarray(signal)
     if arr.ndim != 1:
         raise ValueError(f"{name} must be a 1D array. Got shape {arr.shape}.")
@@ -89,7 +88,8 @@ def _as_complex_1d(
 
 @dataclass
 class InputState:
-    """Runtime state for the input channels."""
+    """Estado de ejecución de las señales de entrada de la cadena, incluyendo
+    referencia, vigilancia y origen de los datos."""
 
     reference: np.ndarray
     surveillance: np.ndarray
@@ -100,7 +100,8 @@ class InputState:
 
 @dataclass
 class SimulationState:
-    """Runtime state for simulated intermediate signals."""
+    """Estado de ejecución de las señales intermedias simuladas, incluyendo
+    clutter, eco y Doppler del blanco."""
 
     clutter: np.ndarray | None = None
     echo: np.ndarray | None = None
@@ -110,7 +111,8 @@ class SimulationState:
 
 @dataclass
 class WindowState:
-    """Runtime state for the windowed reference signal."""
+    """Estado de ejecución de la señal de referencia luego de aplicar el
+    ventaneo configurado."""
 
     reference: np.ndarray
     applied: bool
@@ -121,7 +123,8 @@ class WindowState:
 
 @dataclass
 class FilterState:
-    """Runtime state for the surveillance channel after clutter filtering."""
+    """Estado de ejecución de la señal de vigilancia luego del filtrado de
+    clutter."""
 
     surveillance: np.ndarray
     applied: bool
@@ -130,7 +133,8 @@ class FilterState:
 
 @dataclass
 class CAFState:
-    """Runtime state for the most recent CAF computation."""
+    """Estado de ejecución del cálculo más reciente de la función de
+    ambigüedad cruzada."""
 
     caf: np.ndarray
     freq_axis: np.ndarray
@@ -142,7 +146,8 @@ class CAFState:
 
 @dataclass
 class DetectionState:
-    """Runtime state for the most recent detection output."""
+    """Estado de ejecución de la etapa de detección, incluyendo detecciones,
+    estimación de ruido y umbral aplicado."""
 
     detections: tuple[np.ndarray, np.ndarray] | np.ndarray | None
     sigma_est: np.ndarray | None = None
@@ -151,19 +156,21 @@ class DetectionState:
 
 @dataclass
 class ChannelState:
-    """Runtime state for the optional channel/noise stage."""
+    """Estado de ejecución de la etapa opcional de canal y ruido aplicada
+    sobre las señales de entrada."""
 
     reference_ch: np.ndarray | None = None
     surveillance_ch: np.ndarray | None = None
     applied: bool = False
     add_noise: bool = False
     noise_power_db: float | None = None
-    noise_added: np.ndarray | None = None
+    noise_added: tuple[np.ndarray, np.ndarray] | np.ndarray | None = None
 
 
 @dataclass
 class PipelineState:
-    """Aggregate runtime state for the entire processing chain."""
+    """Estado agregado de ejecución de toda la cadena de procesamiento,
+    incluyendo etapas, resultados intermedios y metadatos de ejecución."""
 
     inputs: InputState | None = None
     channel: ChannelState | None = None
@@ -210,7 +217,7 @@ class PassiveRadarChain:
         verbose: bool | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
-        """Initialize the chain with configuration, state, and logging."""
+        """Inicializa la cadena de procesamiento con su configuración, estado interno y sistema de logging."""
         self.config = config or PassiveRadarChainConfig()
         self.state = PipelineState()
         self._external_inputs_were_set = False
@@ -229,12 +236,13 @@ class PassiveRadarChain:
         verbose: bool | None = None,
         logger: logging.Logger | None = None,
     ) -> "PassiveRadarChain":
-        """Construct a chain instance from a previously saved JSON configuration."""
+        """Crea una instancia de la cadena a partir de un archivo JSON de configuración previamente guardado."""
         config = cls._config_from_json(path)
         return cls(config=config, verbose=verbose, logger=logger)
 
     def _configure_logger(self, verbose: bool | None = None) -> None:
-        """Configure the internal logger if the caller did not configure one already."""
+        """Configura el logger interno si no fue configurado externamente."""
+
         if not self.logger.handlers:
             handler = logging.StreamHandler()
             formatter = logging.Formatter("[%(levelname)s] %(name)s: %(message)s")
@@ -247,13 +255,13 @@ class PassiveRadarChain:
             self.logger.setLevel(logging.INFO if verbose else logging.WARNING)
 
     def _resolve_output_root(self) -> Path:
-        """Resolve the package-level ``simulated_data`` directory requested by the user."""
+        """Determina el directorio raíz donde se almacenarán configuraciones, estados y figuras generadas."""
         if self.config.io.output_root is not None:
             return Path(self.config.io.output_root).expanduser().resolve()
         return Path(__file__).resolve().parents[3] / "simulated_data"
 
     def _ensure_output_directories(self) -> None:
-        """Create output directories for configs, states, and figures if needed."""
+        """Crea los directorios de salida necesarios si todavía no existen."""
         for directory in (
             self.output_root,
             self.output_root / "configs",
@@ -263,12 +271,12 @@ class PassiveRadarChain:
             directory.mkdir(parents=True, exist_ok=True)
 
     def _default_stem(self, prefix: str) -> str:
-        """Generate a timestamped default filename stem."""
+        """Genera un nombre base con prefijo y marca temporal para archivos de salida."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"{prefix}_{timestamp}"
 
     def _validate_stage_name(self, stage: str) -> StageName:
-        """Validate that a stage name is one of the supported pipeline stages."""
+        """Verifica que el nombre de etapa sea válido dentro de la cadena de procesamiento."""
         if stage not in self._STAGE_ORDER:
             raise ValueError(
                 f"Invalid stage '{stage}'. Expected one of {self._STAGE_ORDER}."
@@ -276,22 +284,22 @@ class PassiveRadarChain:
         return stage  # type: ignore[return-value]
 
     def _stage_index(self, stage: StageName) -> int:
-        """Return the ordinal index of a pipeline stage."""
+        """Devuelve el índice ordinal asociado a una etapa de la cadena."""
         return self._STAGE_ORDER.index(stage)
 
     def _mark_completed(self, stage: StageName) -> None:
-        """Mark a stage as completed and all earlier stages as available."""
+        """Marca una etapa como completada y actualiza el estado de disponibilidad de las etapas previas."""
         for known_stage in self._STAGE_ORDER:
             if self._stage_index(known_stage) <= self._stage_index(stage):
                 self.state.completed_stages[known_stage] = True
         self.state.last_completed_stage = stage
 
     def _store_stage_snapshot(self, stage: StageName) -> None:
-        """Store a serializable snapshot of the current config relevant to a stage."""
+        """Guarda una instantánea serializable de la configuración relevante para una etapa."""
         self.state.stage_snapshots[stage] = self._stage_snapshot(stage)
 
     def _stage_snapshot(self, stage: StageName) -> dict[str, Any]:
-        """Build a serializable snapshot of the configuration relevant to one stage."""
+        """Construye una instantánea serializable de la configuración asociada a una etapa específica."""
         if stage == "inputs":
             desired_mode = (
                 "simulated" if self.config.input.use_simulated_data else "real"
@@ -316,7 +324,7 @@ class PassiveRadarChain:
         raise ValueError(f"Unknown stage '{stage}'.")
 
     def _auto_invalidate_if_needed(self, stage: StageName) -> None:
-        """Invalidate a stage and all downstream stages when its config changed."""
+        """Invalida una etapa y las posteriores si detecta cambios en su configuración respecto de la última ejecución."""
         if stage not in self.state.stage_snapshots:
             return
         current = self._stage_snapshot(stage)
@@ -329,7 +337,7 @@ class PassiveRadarChain:
             self.invalidate_from(stage)
 
     def invalidate_from(self, stage: str, *, include_stage: bool = True) -> None:
-        """Invalidate cached results from a given stage onward."""
+        """Invalida los resultados almacenados desde una etapa dada en adelante."""
         valid_stage = self._validate_stage_name(stage)
         start_index = self._stage_index(valid_stage)
         if not include_stage:
@@ -361,68 +369,68 @@ class PassiveRadarChain:
         )
 
     def reset(self) -> None:
-        """Reset the entire chain state while preserving the current configuration."""
+        """Reinicia completamente el estado de la cadena manteniendo intacta la configuración actual."""
         self.logger.info("Resetting chain state.")
         self.state = PipelineState()
         self._external_inputs_were_set = False
 
     def update_input_config(self, **kwargs: Any) -> None:
-        """Update input configuration values and invalidate the input stage if needed."""
+        """Actualiza la configuración de entrada e invalida la etapa correspondiente si es necesario."""
         self._update_dataclass(self.config.input, **kwargs)
         self._auto_invalidate_if_needed("inputs")
 
     def update_channel_config(self, **kwargs: Any) -> None:
-        """Update channel configuration values and invalidate the channel stage if needed."""
+        """Actualiza la configuración del bloque "channel" e invalida la etapa correspondiente si es necesario."""
         self._update_dataclass(self.config.channel, **kwargs)
         self._auto_invalidate_if_needed("channel")
 
     def update_simulation_config(self, **kwargs: Any) -> None:
-        """Update simulation configuration values and invalidate the input stage if needed."""
+        """Actualiza la configuración general de simulación e invalida la etapa de entrada si corresponde."""
         self._update_dataclass(self.config.simulation, **kwargs)
         self._auto_invalidate_if_needed("inputs")
 
     def update_clutter_config(self, **kwargs: Any) -> None:
-        """Update clutter generator configuration and invalidate the input stage if needed."""
+        """Actualiza la configuración del clutter e invalida la etapa de entrada si corresponde."""
         self._update_dataclass(self.config.simulation.clutter, **kwargs)
         self._auto_invalidate_if_needed("inputs")
 
     def update_echo_config(self, **kwargs: Any) -> None:
-        """Update echo generator configuration and invalidate the input stage if needed."""
+        """Actualiza la configuración del clutter e invalida la etapa de entrada si corresponde."""
         self._update_dataclass(self.config.simulation.echo, **kwargs)
         self._auto_invalidate_if_needed("inputs")
 
     def update_window_config(self, **kwargs: Any) -> None:
-        """Update window configuration and invalidate the window stage if needed."""
+        """Actualiza la configuración del bloque "window" e invalida la etapa de entrada si corresponde."""
         self._update_dataclass(self.config.window, **kwargs)
         self._auto_invalidate_if_needed("window")
 
     def update_filter_config(self, **kwargs: Any) -> None:
-        """Update filter configuration and invalidate the filter stage if needed."""
+        """Actualiza la configuración del bloque "filter" e invalida la etapa de entrada si corresponde."""
         self._update_dataclass(self.config.filter, **kwargs)
         self._auto_invalidate_if_needed("filter")
 
     def update_caf_config(self, **kwargs: Any) -> None:
-        """Update CAF configuration and invalidate the CAF stage if needed."""
+        """Actualiza la configuración del bloque "caf" e invalida la etapa de entrada si corresponde."""
         self._update_dataclass(self.config.caf, **kwargs)
         self._auto_invalidate_if_needed("caf")
 
     def update_cfar_config(self, **kwargs: Any) -> None:
-        """Update CFAR configuration and invalidate the detection stage if needed."""
+        """Actualiza la configuración del bloque "detect" e invalida la etapa de entrada si corresponde."""
         self._update_dataclass(self.config.cfar, **kwargs)
         self._auto_invalidate_if_needed("detect")
 
     def update_plot_config(self, **kwargs: Any) -> None:
-        """Update plotting configuration values."""
+        """Actualiza la configuración asociada al graficado de resultados."""
         self._update_dataclass(self.config.plot, **kwargs)
 
     def update_io_config(self, **kwargs: Any) -> None:
-        """Update I/O configuration values and refresh the output directories if needed."""
+        """Actualiza la configuración de entrada/salida y recrea los directorios necesarios si cambia la ruta de salida."""
         self._update_dataclass(self.config.io, **kwargs)
         self.output_root = self._resolve_output_root()
         self._ensure_output_directories()
 
     def _update_dataclass(self, target: Any, **kwargs: Any) -> None:
-        """Assign keyword values into a dataclass and rerun its validation hook."""
+        """Asigna valores a un dataclass de configuración y ejecuta su validación posterior si existe."""
         for key, value in kwargs.items():
             if not hasattr(target, key):
                 raise AttributeError(
@@ -442,7 +450,7 @@ class PassiveRadarChain:
         f_c: float | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        """Set external real-data inputs and invalidate downstream cached results."""
+        """Define señales de entrada externas, actualiza la configuración asociada e invalida las etapas posteriores."""
         ref = _as_complex_1d(reference, "reference")
         surv = _as_complex_1d(surveillance, "surveillance")
         if ref.shape != surv.shape:
@@ -472,11 +480,7 @@ class PassiveRadarChain:
         self.logger.info("External inputs set successfully (length=%d).", len(ref))
 
     def load_inputs(self, path: str | Path) -> None:
-        """Load external real-data inputs from an ``.npz`` file.
-
-        The input file must contain ``reference`` and ``surveillance`` arrays. It may
-        also contain ``fs`` and ``f_c`` scalar values.
-        """
+        """Carga señales de referencia y vigilancia desde un archivo .npz y las establece como entradas externas."""
         path = Path(path).expanduser().resolve()
         with np.load(path, allow_pickle=False) as npz:
             if "reference" not in npz or "surveillance" not in npz:
@@ -490,7 +494,7 @@ class PassiveRadarChain:
         self.set_inputs(ref, surv, fs=fs, f_c=f_c, metadata={"loaded_from": str(path)})
 
     def simulate_inputs(self, reference: np.ndarray | None = None) -> InputState:
-        """Simulate reference and surveillance signals using the existing generator classes."""
+        """Genera señales simuladas de referencia y vigilancia a partir de la configuración actual del escenario."""
         self.config.input.use_simulated_data = True
         self._auto_invalidate_if_needed("inputs")
         self.logger.info("Simulating input signals.")
@@ -567,7 +571,7 @@ class PassiveRadarChain:
         return self.state.inputs
 
     def _ensure_inputs_available(self) -> InputState:
-        """Ensure that the chain has input signals available for downstream stages."""
+        """Garantiza que existan señales de entrada disponibles, ya sea cargadas externamente o simuladas."""
         self._auto_invalidate_if_needed("inputs")
         if self.state.inputs is not None:
             return self.state.inputs
@@ -584,7 +588,7 @@ class PassiveRadarChain:
         )
 
     def apply_channel(self) -> ChannelState:
-        """Apply the optional channel/noise stage and cache its outputs."""
+        """Aplica la etapa opcional de canal y ruido a las señales de entrada y almacena sus resultados."""
         self._auto_invalidate_if_needed("channel")
         if self.state.channel is not None:
             return self.state.channel
@@ -602,6 +606,7 @@ class PassiveRadarChain:
                 surv=inputs.surveillance,
                 ref=inputs.reference,
                 add_noise=self.config.channel.add_noise,
+                noise_on_both_channels=self.config.channel.noise_on_both_channels,
                 noise_power_db=self.config.channel.noise_power_db,
                 channel_response=self.config.channel.channel_respone,
             )
@@ -628,7 +633,7 @@ class PassiveRadarChain:
         return self.state.channel
 
     def apply_filter(self) -> FilterState:
-        """Apply the optional clutter filter to the surveillance signal and cache its output."""
+        """Aplica el filtro de clutter sobre la señal de vigilancia y almacena la salida resultante."""
         self._auto_invalidate_if_needed("filter")
         if self.state.filter is not None:
             return self.state.filter
@@ -658,7 +663,7 @@ class PassiveRadarChain:
         return self.state.filter
 
     def apply_window(self) -> WindowState:
-        """Apply the optional reference windowing stage and cache its output."""
+        """Aplica el ventaneo configurado sobre la señal de referencia y almacena la salida resultante."""
         self._auto_invalidate_if_needed("window")
         if self.state.window is not None:
             return self.state.window
@@ -691,7 +696,7 @@ class PassiveRadarChain:
         return self.state.window
 
     def compute_caf(self) -> CAFState:
-        """Compute the cross-ambiguity function using the current upstream cached signals."""
+        """Calcula la función de ambigüedad cruzada a partir de las señales procesadas en las etapas previas."""
         self._auto_invalidate_if_needed("caf")
         if self.state.caf is not None:
             return self.state.caf
@@ -731,7 +736,7 @@ class PassiveRadarChain:
         return self.state.caf
 
     def run_detection(self) -> DetectionState:
-        """Run CA-CFAR detection on the magnitude of the current CAF."""
+        """Ejecuta la detección CFAR sobre la magnitud de la CAF y almacena el resultado."""
         self._auto_invalidate_if_needed("detect")
         if self.state.detection is not None:
             return self.state.detection
@@ -745,31 +750,21 @@ class PassiveRadarChain:
                 detections=None, sigma_est=None, alpha_det=None
             )
         else:
-            if not self.config.cfar.bidimensional:
-                result = ca_cfar_1d(
-                    np.abs(caf_state.caf),
-                    Nw=self.config.cfar.Nw,
-                    Ng=self.config.cfar.Ng,
-                    pfa=self.config.cfar.P_fa,
-                    return_intermediate=self.config.cfar.return_intermediate,
-                )
-            else:
-                result = ca_cfar_2d(
-                    np.abs(caf_state.caf),
-                    Nw=self.config.cfar.Nw,
-                    Ng=self.config.cfar.Ng,
-                    pfa=self.config.cfar.P_fa,
-                    return_intermediate=self.config.cfar.return_intermediate,
-                )
-            if self.config.cfar.return_intermediate:
-                detections, sigma_est, alpha_det = result
-                self.state.detection = DetectionState(
-                    detections=detections,
-                    sigma_est=np.asarray(sigma_est),
-                    alpha_det=float(alpha_det),
-                )
-            else:
-                self.state.detection = DetectionState(detections=result)
+            result = ca_cfar(
+                np.abs(caf_state.caf),
+                Nw=self.config.cfar.Nw,
+                Ng=self.config.cfar.Ng,
+                pfa=self.config.cfar.P_fa,
+                detection_2d=self.config.cfar.bidimensional,
+                freq_wrap=self.config.cfar.freq_wrap,
+            )
+
+            detections, sigma_est, alpha_det = result
+            self.state.detection = DetectionState(
+                detections=detections,
+                sigma_est=np.asarray(sigma_est),
+                alpha_det=float(alpha_det),
+            )
 
         self.state.completed_stages["detect"] = True
         self._store_stage_snapshot("detect")
@@ -779,7 +774,7 @@ class PassiveRadarChain:
     def run(
         self, *, start_from: str = "inputs", stop_at: str = "detect"
     ) -> PipelineState:
-        """Run the chain from one stage to another, inclusive."""
+        """Ejecuta la cadena de procesamiento entre dos etapas especificadas, inclusive."""
         start = self._validate_stage_name(start_from)
         stop = self._validate_stage_name(stop_at)
         if self._stage_index(start) > self._stage_index(stop):
@@ -806,19 +801,49 @@ class PassiveRadarChain:
         return self.get_state()
 
     def run_from(self, stage: str) -> PipelineState:
-        """Run the chain starting from a chosen stage up to detection."""
+        """Ejecuta la cadena desde una etapa dada hasta la etapa final de detección."""
         return self.run(start_from=stage, stop_at="detect")
 
     def run_until(self, stage: str) -> PipelineState:
-        """Run the chain from the beginning up to a chosen stage."""
+        """Ejecuta la cadena desde el inicio hasta la etapa indicada."""
         return self.run(start_from="inputs", stop_at=stage)
 
-    def get_state(self) -> PipelineState:
-        """Return a deep copy of the current runtime state."""
-        return copy.deepcopy(self.state)
+    def get_state(
+        self, stage: str | None = None
+    ) -> (
+        PipelineState
+        | InputState
+        | ChannelState
+        | FilterState
+        | WindowState
+        | CAFState
+        | DetectionState
+        | None
+    ):
+        """Devuelve una copia del estado completo de la cadena o del bloque indicado."""
+        if stage is None:
+            return copy.deepcopy(self.state)
+
+        stage_map = {
+            "inputs": self.state.inputs,
+            "channel": self.state.channel,
+            "filter": self.state.filter,
+            "window": self.state.window,
+            "caf": self.state.caf,
+            "detection": self.state.detection,
+        }
+
+        if stage not in stage_map:
+            self.logger.warning(
+                "Invalid stage '%s'. Must be one of %s. Returning the full pipeline state.",
+                stage,
+            )
+            return copy.deepcopy(self.state)
+
+        return copy.deepcopy(stage_map[stage])
 
     def save_config(self, path: str | Path | None = None) -> Path:
-        """Serialize the current configuration to a JSON file."""
+        """Guarda la configuración actual de la cadena en un archivo JSON."""
         path = (
             Path(path)
             if path is not None
@@ -832,7 +857,7 @@ class PassiveRadarChain:
         return path
 
     def load_config(self, path: str | Path, *, reset_state: bool = True) -> None:
-        """Load a JSON configuration into the current chain instance."""
+        """Carga una configuración desde un archivo JSON y opcionalmente reinicia el estado actual."""
         self.config = self._config_from_json(path)
         self.output_root = self._resolve_output_root()
         self._ensure_output_directories()
@@ -844,7 +869,7 @@ class PassiveRadarChain:
 
     @staticmethod
     def _config_from_json(path: str | Path) -> PassiveRadarChainConfig:
-        """Deserialize a JSON configuration file into config dataclasses."""
+        """Reconstruye la configuración completa de la cadena a partir de un archivo JSON."""
         path = Path(path).expanduser().resolve()
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
@@ -871,7 +896,7 @@ class PassiveRadarChain:
         )
 
     def save_state(self, path: str | Path | None = None) -> tuple[Path, Path]:
-        """Save the current numerical pipeline state to ``.npz`` plus JSON metadata."""
+        """Guarda el estado numérico actual de la cadena en archivos .npz y .json."""
         stem_path = (
             Path(path)
             if path is not None
@@ -973,7 +998,7 @@ class PassiveRadarChain:
         return npz_path, meta_path
 
     def load_state(self, path: str | Path) -> None:
-        """Load a previously saved numerical pipeline state from ``.npz`` and JSON metadata."""
+        """Carga un estado previamente guardado desde archivos .npz y .json."""
         path = Path(path).expanduser().resolve()
         npz_path = path if path.suffix == ".npz" else path.with_suffix(".npz")
         meta_path = path.with_suffix(".json")
@@ -1068,7 +1093,7 @@ class PassiveRadarChain:
         self.logger.info("State loaded from %s and %s", npz_path, meta_path)
 
     def _prepare_figure_path(self, filename: str | None, stem_prefix: str) -> Path:
-        """Build a figure output path inside the package-level ``simulated_data/figures`` folder."""
+        """Construye la ruta de salida para una figura dentro del directorio configurado."""
         if filename is None:
             filename = (
                 f"{self._default_stem(stem_prefix)}.{self.config.io.figure_format}"
@@ -1084,7 +1109,7 @@ class PassiveRadarChain:
         xlim: tuple[float, float] | None,
         ylim: tuple[float, float] | None,
     ) -> None:
-        """Apply configured x/y limits to a Matplotlib axes when provided."""
+        """Aplica límites en los ejes x e y de una figura si fueron definidos en la configuración."""
         if xlim is not None:
             ax.set_xlim(*xlim)
         if ylim is not None:
@@ -1101,7 +1126,7 @@ class PassiveRadarChain:
         detections: tuple | None = None,
         **imshow_kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Plot the most recent CAF and optionally save/show the figure."""
+        """Grafica la CAF actual, opcionalmente superpone detecciones y permite mostrar o guardar la figura."""
         caf_state = self.compute_caf()
         show = self.config.plot.show if show is None else show
         save = self.config.plot.save if save is None else save
@@ -1153,7 +1178,7 @@ class PassiveRadarChain:
         db: bool | None = None,
         **imshow_kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Plot the most recent CAF with the current detections overlaid on a copied figure."""
+        """Grafica la CAF actual con las detecciones estimadas superpuestas y permite mostrar o guardar la figura."""
         detection_state = self.run_detection()
         show = self.config.plot.show if show is None else show
         save = self.config.plot.save if save is None else save

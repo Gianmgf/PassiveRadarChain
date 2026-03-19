@@ -7,19 +7,30 @@ def block_lattice_filter(
     reference: np.ndarray,
     order: int = 100,
 ) -> np.ndarray:
-    """Block-based lattice filter para suprimir clutter/direct path.
+    """Aplica un filtro lattice por bloques para atenuar el clutter y la componente
+    de camino directo presentes en la señal de vigilancia.
 
-    Parámetros
+    Parameters
     ----------
-    surveillance : np.ndarray (1D, complejo)
-    reference : np.ndarray (1D, complejo)
-    order : int
-        Orden del filtro (cantidad de etapas).
+    surveillance : np.ndarray
+        Señal del canal de vigilancia. Debe ser un vector unidimensional.
+    reference : np.ndarray
+        Señal del canal de referencia. Debe tener la misma forma que
+        ``surveillance``.
+    order : int, optional
+        Orden del filtro lattice, equivalente a la cantidad de etapas de
+        cancelación aplicadas. Por defecto es ``100``.
 
     Returns
     -------
     np.ndarray
-        Señal surveillance filtrada (misma forma que entrada).
+        Señal de vigilancia filtrada, con la misma forma que la entrada.
+
+    Raises
+    ------
+    ValueError
+        Si ``surveillance`` y ``reference`` no tienen la misma forma, si no son
+        vectores unidimensionales, o si ``order`` no es positivo.
     """
     surveillance = np.asarray(surveillance)
     reference = np.asarray(reference)
