@@ -25,13 +25,13 @@ El repositorio incluye:
 git clone https://github.com/tu-usuario/tu-repo.git
 cd tu-repo
 ```
-###2. Crear el entorno Conda
+### 2. Crear el entorno Conda
 '''bash
 conda env create -f environment.yml
 conda activate pr
 '''
 
-###3. Instalar el paquete en modo editable
+### 3. Instalar el paquete en modo editable
 '''bash
 pip install -e .
 '''
