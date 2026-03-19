@@ -5,7 +5,8 @@ from ..utils.constants import C
 
 
 class ClutterGenerator:
-    """Genera una señal de clutter simulada para un escenario de radar pasivo bistático.
+    """
+    Genera una señal de clutter simulada para un escenario de radar pasivo bistático.
 
     La clase modela múltiples reflectores estacionarios distribuidos en posiciones
     del plano. A partir de la geometría transmisor–clutter–receptor, calcula el

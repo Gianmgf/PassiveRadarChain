@@ -80,9 +80,9 @@ def apply_noise_and_channel(
             ref_out = np.convolve(ref_out, h, mode="same")
 
     if add_noise:
-        surv_out, noise_surv = awgn(surv_out, noise_power_db / 2, True)
+        surv_out, noise_surv = awgn(surv_out, noise_power_db, True)
         noise_added = noise_surv
         if noise_on_both_channels:
-            ref_out, noise_ref = awgn(ref_out, noise_power_db / 2, True)
+            ref_out, noise_ref = awgn(ref_out, noise_power_db, True)
             noise_added = (noise_ref, noise_added)
     return surv_out, ref_out, noise_added
