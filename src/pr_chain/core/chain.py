@@ -812,6 +812,7 @@ class PassiveRadarChain:
         self, stage: str | None = None
     ) -> (
         PipelineState
+        | SimulationState
         | InputState
         | ChannelState
         | FilterState
@@ -826,6 +827,7 @@ class PassiveRadarChain:
 
         stage_map = {
             "inputs": self.state.inputs,
+            "simulation": self.state.simulation,
             "channel": self.state.channel,
             "filter": self.state.filter,
             "window": self.state.window,
