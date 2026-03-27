@@ -608,7 +608,7 @@ class PassiveRadarChain:
                 add_noise=self.config.channel.add_noise,
                 noise_on_both_channels=self.config.channel.noise_on_both_channels,
                 noise_power_db=self.config.channel.noise_power_db,
-                channel_response=self.config.channel.channel_respone,
+                channel_response=self.config.channel.channel_response,
             )
         else:
             surv_ch = inputs.surveillance.copy()

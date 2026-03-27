@@ -21,9 +21,11 @@ N_SAMPELS = 1_000_000
 INCLUDE_ISDBT = True
 
 BASE_DIR = Path(__file__).resolve().parent
-FIG_DIR = BASE_DIR.parent / "simulated_data" / "figures"
-FIG_DIR.mkdir(parents=True, exist_ok=True)
+DATA_DIR = BASE_DIR.parent / "data"
 np.random.seed(47)
+
+REMOD = False
+REMOD_TITLE = "_remod" if REMOD else "_no_remod"
 
 
 def build_config() -> PassiveRadarChainConfig:
@@ -83,49 +85,41 @@ def main() -> None:
     chain = PassiveRadarChain(config=build_config(), verbose=True)
 
     if INCLUDE_ISDBT:
-        isdbt = np.load("isdbt_signal.npy")
+        isdbt = np.load(DATA_DIR / "isdbt_signal.npy")
         isdbt = isdbt[0:N_SAMPELS]
         E = np.mean(np.abs(isdbt) ** 2)
         N_o_in = utils.math.to_db(E / utils.math.from_db(12))
         chain.update_channel_config(
-            noise_on_both_channels=True,
+            noise_on_both_channels=not REMOD,
             noise_power_db=N_o_in,
         )
         chain.simulate_inputs(isdbt)
 
     chain.run(start_from="channel", stop_at="caf")
-    _, ax1 = chain.plot_caf(filename="caf_no_remod.png", title="CAF")
-    ax1.set_xlabel("kHz")
-    ax1.set_ylabel("m")
+    chain.plot_caf(filename=f"caf{REMOD_TITLE}.png", title="CAF")
 
     chain.update_filter_config(enabled=True)
     chain.run_from("filter")
-    _, ax2 = chain.plot_caf(
-        filename="filtered_caf_no_remod.png",
-        title="CAF con CF (Sin ventanas)",
+    chain.plot_caf(
+        filename=f"filtered_caf{REMOD_TITLE}.png",
+        title="CAF (CF)",
     )
-    ax2.set_xlabel("kHz")
-    ax2.set_ylabel("m")
 
     chain.update_window_config(enabled=True)
     chain.run_from("window")
-    _, ax3 = chain.plot_caf(
-        filename="filtered_w_caf_no_remod.png",
-        title="CAF con cf (Con ventanas)",
+    chain.plot_caf(
+        filename=f"filtered_w_caf{REMOD_TITLE}.png",
+        title="CAF (CF + Ventanas)",
     )
-    ax3.set_xlabel("kHz")
-    ax3.set_ylabel("m")
 
     chain.run_detection()
-    _, ax4 = chain.plot_detections(
-        filename="filtered_w_detections_no_remod.png",
-        title="CF + Windowed CAF Detections",
+    chain.plot_detections(
+        filename=f"filtered_w_detections{REMOD_TITLE}.png",
+        title="Detecciones CAF (CF + Ventanas) ",
     )
-    ax4.set_xlabel("kHz")
-    ax4.set_ylabel("m")
 
-    chain.save_config(filename="config_no_remod")
-    chain.save_state(filename="state_no_remod")
+    # chain.save_config(filename="config_no_remod")
+    # chain.save_state(filename="state_no_remod")
 
 
 if __name__ == "__main__":

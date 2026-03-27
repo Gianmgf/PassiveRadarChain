@@ -24,7 +24,7 @@ class ChannelConfig:
     enable: bool = False
     add_noise: bool = False
     noise_power_db: float = 0.0
-    channel_respone: np.ndarray | None = None
+    channel_response: np.ndarray | None = None
     noise_on_both_channels: bool = True
 
 

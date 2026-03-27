@@ -114,14 +114,14 @@ def plot_caf(caf, extent, db=False, figsize=(9, 6), **imshow_kwargs):
         imshow_kwargs["aspect"] = "auto"
     if db:
         caf_plot = to_db(np.abs(caf))
-        label = "CAF (dB)"
+        label = "| CAF | [dB]"
     else:
         caf_plot = np.abs(caf)
-        label = "CAF"
+        label = "| CAF |"
     im = ax.imshow(caf_plot, extent=extent, **imshow_kwargs)
     fig.colorbar(im, ax=ax, label=label)
-    ax.set_xlabel("Frequency (Hz)")
-    ax.set_ylabel("Range (m)")
+    ax.set_xlabel("Doppler [ kHz ]")
+    ax.set_ylabel("Rango [ m ]")
     ax.set_title("Cross-Ambiguity Function")
 
     return fig, ax
@@ -264,8 +264,8 @@ def plot_caf_cuts(
                 thr_cut = _format_y(sigma_est[r_idx, :] * alpha_est)
                 ax[i].plot(freq_axis, thr_cut, label="Umbral sigma_est · alpha_est")
 
-        ax[i].set_title(f"Corte en frecuencia @ bin de rango {r_idx}")
-        ax[i].set_xlabel("Frecuencia")
+        ax[i].set_title(f"Corte en Doppler @ bin de rango {r_idx}")
+        ax[i].set_xlabel("Doppler")
         ax[i].set_ylabel("|CAF| [dB]" if en_db else "|CAF|")
         ax[i].legend()
         i += 1

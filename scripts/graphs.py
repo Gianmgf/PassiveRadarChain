@@ -34,9 +34,10 @@ def main() -> None:
     fig1, ax1 = utils.plot_caf(
         detection_state_no_remod.sigma_est,
         caf_state_no_remod.extent,
+        db=True,
     )
-    ax1.set_xlabel("kHz")
-    ax1.set_ylabel("m")
+    ax1.set_xlabel("Doppler [ kHz ]")
+    ax1.set_ylabel("Rango [ m ]")
     ax1.set_title(r"CA-CFAR $\hat{\sigma}$ [ m, k]")
     fig1.savefig(FIG_DIR / "sigma_est_no_remod.png", dpi=300, bbox_inches="tight")
 
@@ -77,8 +78,8 @@ def main() -> None:
     lineas_range[0].set_label(f"CAF (pico: {max_peak_cut_db:.2f} dB)")
     lineas_range[1].set_label("Umbral CFAR")
 
-    ax2[0].set_title(f"Corte en frecuencia @ range bin {r_idx}")
-    ax2[0].set_xlabel("Freq [kHz]")
+    ax2[0].set_title(f"Corte en Doppler @ bin de rango {r_idx}")
+    ax2[0].set_xlabel("Doppler [kHz]")
     ax2[0].set_ylabel("|CAF| [dB]")
     ax2[0].legend()
 
@@ -95,10 +96,11 @@ def main() -> None:
     fig3, ax3 = utils.plot_caf(
         detection_state_remod.sigma_est,
         caf_state_remod.extent,
+        db=True,
     )
-    ax3.set_xlabel("kHz")
-    ax3.set_ylabel("m")
     ax3.set_title(r"CA-CFAR $\hat{\sigma}$ [ m, k]")
+    ax3.set_xlabel("Doppler [kHz]")
+    ax3.set_ylabel("Rango [m]")
     fig3.savefig(FIG_DIR / "sigma_est_remod.png", dpi=300, bbox_inches="tight")
 
     rows, cols = detection_state_remod.detections
@@ -118,8 +120,8 @@ def main() -> None:
         corte_range=True,
         f_idx=f_idx,
         r_idx=r_idx,
-        sigma_est=detection_state_no_remod.sigma_est,
-        alpha_est=detection_state_no_remod.alpha_det,
+        sigma_est=detection_state_remod.sigma_est,
+        alpha_est=detection_state_remod.alpha_det,
         plot_sigma=False,
         plot_umbral=True,
         en_db=True,
@@ -139,7 +141,7 @@ def main() -> None:
     lineas_range[1].set_label("Umbral CFAR")
 
     ax4[0].set_title(f"Corte en frecuencia @ range bin {r_idx}")
-    ax4[0].set_xlabel("Freq [kHz]")
+    ax4[0].set_xlabel("Doppler [kHz]")
     ax4[0].set_ylabel("|CAF| [dB]")
     ax4[0].legend()
 
@@ -174,7 +176,6 @@ def main() -> None:
         f_idx=f_idx,
         r_idx=r_idx,
         sigma_est=detection_state_remod.sigma_est,
-        alpha_est=detection_state_no_remod.alpha_det,
         plot_sigma=True,
         plot_umbral=False,
         en_db=True,
@@ -188,7 +189,6 @@ def main() -> None:
         f_idx=f_idx,
         r_idx=r_idx,
         sigma_est=detection_state_no_remod.sigma_est,
-        alpha_est=detection_state_no_remod.alpha_det,
         plot_sigma=True,
         plot_umbral=False,
         en_db=True,
@@ -216,7 +216,7 @@ def main() -> None:
     lineas_range[3].set_linestyle("--")
 
     ax5[0].set_title(f"Corte en frecuencia @ range bin {r_idx}")
-    ax5[0].set_xlabel("Freq [kHz]")
+    ax5[0].set_xlabel("Doppler [kHz]")
     ax5[0].set_ylabel("|CAF| [dB]")
     ax5[0].legend()
 
