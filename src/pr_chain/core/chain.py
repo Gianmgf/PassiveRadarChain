@@ -844,17 +844,29 @@ class PassiveRadarChain:
 
         return copy.deepcopy(stage_map[stage])
 
-    def save_config(self, path: str | Path | None = None) -> Path:
+    def save_config(
+        self,
+        path: str | Path | None = None,
+        filename: str | None = None,
+    ) -> Path:
         """Guarda la configuración actual de la cadena en un archivo JSON."""
-        path = (
-            Path(path)
-            if path is not None
-            else self.output_root / "configs" / f"{self._default_stem('config')}.json"
-        )
+
+        if path is not None:
+            path = Path(path)
+        else:
+            default_name = (
+                f"{filename}.json"
+                if filename is not None
+                else f"{self._default_stem('config')}.json"
+            )
+            path = self.output_root / "configs" / default_name
+
         path = path.expanduser().resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
+
         with path.open("w", encoding="utf-8") as f:
             json.dump(_jsonify(asdict(self.config)), f, indent=2)
+
         self.logger.info("Configuration saved to %s", path)
         return path
 
@@ -897,13 +909,19 @@ class PassiveRadarChain:
             io=IOConfig(**data.get("io", {})),
         )
 
-    def save_state(self, path: str | Path | None = None) -> tuple[Path, Path]:
+    def save_state(
+        self,
+        path: str | Path | None = None,
+        filename: str | None = None,
+    ) -> tuple[Path, Path]:
         """Guarda el estado numérico actual de la cadena en archivos .npz y .json."""
-        stem_path = (
-            Path(path)
-            if path is not None
-            else self.output_root / "states" / self._default_stem("state")
-        )
+
+        if path is not None:
+            stem_path = Path(path)
+        else:
+            default_name = filename or self._default_stem("state")
+            stem_path = self.output_root / "states" / default_name
+
         stem_path = stem_path.expanduser().resolve()
         stem_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -926,6 +944,7 @@ class PassiveRadarChain:
                 "original_length": self.state.inputs.original_length,
                 "metadata": _jsonify(self.state.inputs.metadata),
             }
+
         if self.state.simulation is not None:
             if self.state.simulation.clutter is not None:
                 arrays["simulation_clutter"] = self.state.simulation.clutter
@@ -955,12 +974,14 @@ class PassiveRadarChain:
                 "freq": self.state.window.freq,
                 "range": self.state.window.range,
             }
+
         if self.state.filter is not None:
             arrays["filter_surveillance"] = self.state.filter.surveillance
             meta["filter"] = {
                 "applied": self.state.filter.applied,
                 "order": self.state.filter.order,
             }
+
         if self.state.caf is not None:
             arrays["caf_matrix"] = self.state.caf.caf
             arrays["caf_freq_axis"] = self.state.caf.freq_axis
@@ -970,6 +991,7 @@ class PassiveRadarChain:
                 "input_length": self.state.caf.input_length,
                 "truncated_length": self.state.caf.truncated_length,
             }
+
         if self.state.detection is not None:
             if isinstance(self.state.detection.detections, tuple):
                 arrays["detection_rows"] = np.asarray(
@@ -986,6 +1008,7 @@ class PassiveRadarChain:
                 meta["detection"] = {"kind": "array"}
             else:
                 meta["detection"] = {"kind": "none"}
+
             if self.state.detection.sigma_est is not None:
                 arrays["detection_sigma_est"] = self.state.detection.sigma_est
             if self.state.detection.alpha_det is not None:
@@ -994,8 +1017,10 @@ class PassiveRadarChain:
                 )
 
         np.savez_compressed(npz_path, **arrays)
+
         with meta_path.open("w", encoding="utf-8") as f:
             json.dump(_jsonify(meta), f, indent=2)
+
         self.logger.info("State saved to %s and %s", npz_path, meta_path)
         return npz_path, meta_path
 

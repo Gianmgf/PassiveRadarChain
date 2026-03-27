@@ -49,18 +49,18 @@ def ca_cfar(
     """
     x = np.asarray(caf, dtype=np.float64)  # ideally power already
     if freq_wrap:
-        modes = ("constant", "wrap")
+        modes = ("nearest", "wrap")
     else:
-        modes = "constant"
+        modes = "nearest"
     total_ng = (2 * Ng + 1) ** 2
     total = (2 * (Nw + Ng) + 1) ** 2
     total_nw = total - total_ng
     if detection_2d:
-        result_ng = uniform_filter(x, 2 * Ng + 1, mode=modes, cval=0.0)
-        result_nw = uniform_filter(x, 2 * (Nw + Ng) + 1, mode=modes, cval=0.0)
+        result_ng = uniform_filter(x, 2 * Ng + 1, mode=modes)
+        result_nw = uniform_filter(x, 2 * (Nw + Ng) + 1, mode=modes)
     else:
-        result_ng = uniform_filter(x, (1, 2 * Ng + 1), mode=modes, cval=0.0)
-        result_nw = uniform_filter(x, (1, 2 * (Nw + Ng) + 1), mode=modes, cval=0.0)
+        result_ng = uniform_filter(x, (1, 2 * Ng + 1), mode=modes)
+        result_nw = uniform_filter(x, (1, 2 * (Nw + Ng) + 1), mode=modes)
     sigma_est = result_nw * total / total_nw - result_ng * total_ng / total_nw
 
     alpha_det = total_nw * (pfa ** (-1.0 / total_nw) - 1.0)
