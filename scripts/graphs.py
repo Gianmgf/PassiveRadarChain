@@ -13,17 +13,17 @@ FIG_DIR = BASE_DIR.parent / "simulated_data" / "figures"
 FIG_SIZE = (9, 6)
 
 
-def main() -> None:
+def main(confs, states) -> None:
 
     chain_remod = PassiveRadarChain.from_config_file(
-        CONFIG_DIR / "config_remod.json", verbose=True
+        CONFIG_DIR / confs[0], verbose=True
     )
     chain_no_remod = PassiveRadarChain.from_config_file(
-        CONFIG_DIR / "config_no_remod.json", verbose=True
+        CONFIG_DIR / confs[1], verbose=True
     )
 
-    chain_remod.load_state(STATE_DIR / "state_remod.npz")
-    chain_no_remod.load_state(STATE_DIR / "state_no_remod.npz")
+    chain_remod.load_state(STATE_DIR / states[0])
+    chain_no_remod.load_state(STATE_DIR / states[1])
 
     caf_state_remod = chain_remod.get_state("caf")
     detection_state_remod = chain_remod.get_state("detection")
@@ -234,6 +234,17 @@ def main() -> None:
         FIG_DIR / "cortes_rf_remod_vs_noremod.png", dpi=300, bbox_inches="tight"
     )
 
+    noise_power_noremod = np.mean(np.abs(detection_state_no_remod.sigma_est) ** 2)
+    noise_power_remod = np.mean(np.abs(detection_state_remod.sigma_est) ** 2)
+
+    noise_dif = utils.to_db(noise_power_noremod) - utils.to_db(noise_power_remod)
+
+    print(noise_dif)
+    x = chain_no_remod.get_state("channel").reference_ch
+    x = np.asarray(x, dtype=np.complex64)
+
+    x.tofile(BASE_DIR.parent / "data" / "senal_complex64.bin")
+
 
 if __name__ == "__main__":
-    main()
+    main(("config_600.json", "config_601.json"), ("state_600.json", "state_601.json"))

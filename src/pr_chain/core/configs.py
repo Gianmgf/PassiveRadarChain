@@ -36,7 +36,6 @@ class InputConfig:
     fs: float = 8e6
     f_c: float = 700e6
     N: int = 500_000
-    seed: int | None = None
     use_simulated_data: bool = True
 
     def __post_init__(self) -> None:
@@ -177,22 +176,53 @@ class CAFConfig:
 
 @dataclass
 class CFARConfig:
-    """Configuración del detector CA-CFAR aplicado sobre la magnitud de la
-    CAF."""
-
     enabled: bool = True
     bidimensional: bool = False
-    Nw: int = 512
-    Ng: int = 8
+    Nw: int | tuple[int, int] | list[int] = 512
+    Ng: int | tuple[int, int] | list[int] = 8
     P_fa: float = 1e-6
     freq_wrap: bool = True
 
     def __post_init__(self) -> None:
-        """Valida los parámetros del detector CFAR."""
-        if self.Nw <= 0:
-            raise ValueError(f"Nw must be positive. Got {self.Nw}.")
-        if self.Ng < 0:
-            raise ValueError(f"Ng must be non-negative. Got {self.Ng}.")
+        # ---- Nw ----
+        if isinstance(self.Nw, int):
+            if self.Nw <= 0:
+                raise ValueError(f"Nw must be positive. Got {self.Nw}.")
+        elif isinstance(self.Nw, (tuple, list)):
+            if len(self.Nw) != 2:
+                raise TypeError(
+                    f"Nw must be an int or a sequence of 2 ints. Got {self.Nw!r}."
+                )
+            if not all(isinstance(v, int) for v in self.Nw):
+                raise TypeError(f"Nw elements must be integers. Got {self.Nw!r}.")
+            if any(v <= 0 for v in self.Nw):
+                raise ValueError(f"All Nw values must be positive. Got {self.Nw}.")
+            self.Nw = (self.Nw[0], self.Nw[1])
+        else:
+            raise TypeError(
+                f"Nw must be an int or a sequence of 2 ints. Got {self.Nw!r}."
+            )
+
+        # ---- Ng ----
+        if isinstance(self.Ng, int):
+            if self.Ng < 0:
+                raise ValueError(f"Ng must be non-negative. Got {self.Ng}.")
+        elif isinstance(self.Ng, (tuple, list)):
+            if len(self.Ng) != 2:
+                raise TypeError(
+                    f"Ng must be an int or a sequence of 2 ints. Got {self.Ng!r}."
+                )
+            if not all(isinstance(v, int) for v in self.Ng):
+                raise TypeError(f"Ng elements must be integers. Got {self.Ng!r}.")
+            if any(v < 0 for v in self.Ng):
+                raise ValueError(f"All Ng values must be non-negative. Got {self.Ng}.")
+            self.Ng = (self.Ng[0], self.Ng[1])
+        else:
+            raise TypeError(
+                f"Ng must be an int or a sequence of 2 ints. Got {self.Ng!r}."
+            )
+
+        # ---- P_fa ----
         if not (0.0 < self.P_fa < 1.0):
             raise ValueError(f"P_fa must be in (0, 1). Got {self.P_fa}.")
 

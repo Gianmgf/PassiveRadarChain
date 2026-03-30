@@ -1,6 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 import numpy as np
+import matplotlib.pyplot as plt
 from pr_chain import PassiveRadarChain
 from pr_chain import utils
 from pr_chain.core.configs import (
@@ -24,15 +25,14 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR.parent / "data"
 np.random.seed(47)
 
-REMOD = False
-REMOD_TITLE = "_remod" if REMOD else "_no_remod"
 
-
-def build_config() -> PassiveRadarChainConfig:
+def build_config(
+    cfar: tuple[int, tuple[int, int]] = (1, (64, 256)),
+) -> PassiveRadarChainConfig:
     """Build a configuration that closely matches the uploaded notebook."""
     return PassiveRadarChainConfig(
         input=InputConfig(
-            N=N_SAMPELS, fs=8126984.0, f_c=700e6, seed=None, use_simulated_data=True
+            N=N_SAMPELS, fs=8126984.0, f_c=700e6, use_simulated_data=True
         ),
         simulation=SimulationConfig(
             transmitter_position=[0.0, 0.0],
@@ -64,14 +64,14 @@ def build_config() -> PassiveRadarChainConfig:
         cfar=CFARConfig(
             enabled=True,
             bidimensional=True,
-            Nw=128,
-            Ng=4,
+            Nw=cfar[1],
+            Ng=cfar[0],
             P_fa=1e-5,
             freq_wrap=True,
         ),
         plot=PlotConfig(
             show=False,
-            save=True,
+            save=False,
             db=True,
             cmap="viridis",
             aspect="auto",
@@ -81,8 +81,12 @@ def build_config() -> PassiveRadarChainConfig:
     )
 
 
-def main() -> None:
-    chain = PassiveRadarChain(config=build_config(), verbose=True)
+def main(remod, beta, cfar=None) -> None:
+    REMOD_TITLE = "_remod" if remod else "_no_remod"
+    if cfar is not None:
+        chain = PassiveRadarChain(config=build_config(cfar=cfar), verbose=True)
+    else:
+        chain = PassiveRadarChain(config=build_config(), verbose=True)
 
     if INCLUDE_ISDBT:
         isdbt = np.load(DATA_DIR / "isdbt_signal.npy")
@@ -90,11 +94,11 @@ def main() -> None:
         E = np.mean(np.abs(isdbt) ** 2)
         N_o_in = utils.math.to_db(E / utils.math.from_db(12))
         chain.update_channel_config(
-            noise_on_both_channels=not REMOD,
+            noise_on_both_channels=not remod,
             noise_power_db=N_o_in,
         )
         chain.simulate_inputs(isdbt)
-
+    chain.plot_scenario_geometry()
     chain.run(start_from="channel", stop_at="caf")
     chain.plot_caf(filename=f"caf{REMOD_TITLE}.png", title="CAF")
 
@@ -105,7 +109,7 @@ def main() -> None:
         title="CAF (CF)",
     )
 
-    chain.update_window_config(enabled=True)
+    chain.update_window_config(enabled=True, beta=beta)
     chain.run_from("window")
     chain.plot_caf(
         filename=f"filtered_w_caf{REMOD_TITLE}.png",
@@ -117,10 +121,14 @@ def main() -> None:
         filename=f"filtered_w_detections{REMOD_TITLE}.png",
         title="Detecciones CAF (CF + Ventanas) ",
     )
-
-    # chain.save_config(filename="config_no_remod")
-    # chain.save_state(filename="state_no_remod")
+    plt.show()
+    # chain.save_config(filename=f"config{REMOD_TITLE}")
+    # chain.save_state(filename=f"state{REMOD_TITLE}")
+    # chain.save_config(filename=f"config_{cfar[1][1]}")
+    # chain.save_state(filename=f"state_{cfar[1][1]}")
+    print(utils.from_db(N_o_in))
 
 
 if __name__ == "__main__":
-    main()
+    main(True, (200.0, 100.0), (1, (254, 600)))
+    # main(False, (200.0, 100.0), (1, (254, 601)))

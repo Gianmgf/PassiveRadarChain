@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 import json
 import logging
-from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -59,21 +58,6 @@ def _jsonify(value: Any) -> Any:
     return value
 
 
-@contextmanager
-def _temporary_seed(seed: int | None):
-    """Fija temporalmente la semilla global de NumPy y restaura el estado previo del generador finalizar."""
-    if seed is None:
-        yield
-        return
-
-    state = np.random.get_state()
-    np.random.seed(seed)
-    try:
-        yield
-    finally:
-        np.random.set_state(state)
-
-
 def _as_complex_1d(
     signal: np.ndarray | list[complex] | tuple[complex, ...], name: str
 ) -> np.ndarray:
@@ -101,11 +85,13 @@ class InputState:
 @dataclass
 class SimulationState:
     """Estado de ejecución de las señales intermedias simuladas, incluyendo
-    clutter, eco y Doppler del blanco."""
+    clutter, eco, Doppler y geometría efectiva del escenario simulado."""
 
     clutter: np.ndarray | None = None
     echo: np.ndarray | None = None
     doppler_hz: float | None = None
+    clutter_positions: np.ndarray | None = None
+    target_position: np.ndarray | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -499,58 +485,78 @@ class PassiveRadarChain:
         self._auto_invalidate_if_needed("inputs")
         self.logger.info("Simulating input signals.")
 
-        with _temporary_seed(self.config.input.seed):
-            if reference is None:
-                reference = self.config.simulation.reference_scale * (
-                    np.random.randn(self.config.input.N)
-                    + 1j * np.random.randn(self.config.input.N)
-                )
-            else:
-                reference = np.asarray(reference, dtype=np.complex128)
-
-            clutter_generator = ClutterGenerator(
-                fs=self.config.input.fs,
-                N_CLUTT=self.config.simulation.clutter.N_CLUTT,
-                clutter_rcs_min_db=self.config.simulation.clutter.clutter_rcs_min_db,
-                clutter_rcs_max_db=self.config.simulation.clutter.clutter_rcs_max_db,
-                rand_clutter=self.config.simulation.clutter.rand_clutter,
-                clutter_positions=self.config.simulation.clutter.clutter_positions,
-                clutter_limits=self.config.simulation.clutter.clutter_limits,
-                Tx_position=self.config.simulation.transmitter_position,
-                Rx_position=self.config.simulation.radar_position,
+        if reference is None:
+            reference = self.config.simulation.reference_scale * (
+                np.random.randn(self.config.input.N)
+                + 1j * np.random.randn(self.config.input.N)
             )
-            echo_generator = EchoGenerator(
-                fs=self.config.input.fs,
-                f_c=self.config.input.f_c,
-                V_b=self.config.simulation.echo.V_b,
-                target_rcs_db=self.config.simulation.echo.target_rcs_db,
-                rand_target=self.config.simulation.echo.rand_target,
-                target_position=self.config.simulation.echo.target_position,
-                target_limits=self.config.simulation.echo.target_limits,
-                Tx_position=self.config.simulation.transmitter_position,
-                Rx_position=self.config.simulation.radar_position,
+        else:
+            reference = np.asarray(reference, dtype=np.complex128)
+
+        clutter_generator = ClutterGenerator(
+            fs=self.config.input.fs,
+            N_CLUTT=self.config.simulation.clutter.N_CLUTT,
+            clutter_rcs_min_db=self.config.simulation.clutter.clutter_rcs_min_db,
+            clutter_rcs_max_db=self.config.simulation.clutter.clutter_rcs_max_db,
+            rand_clutter=self.config.simulation.clutter.rand_clutter,
+            clutter_positions=self.config.simulation.clutter.clutter_positions,
+            clutter_limits=self.config.simulation.clutter.clutter_limits,
+            Tx_position=self.config.simulation.transmitter_position,
+            Rx_position=self.config.simulation.radar_position,
+        )
+        echo_generator = EchoGenerator(
+            fs=self.config.input.fs,
+            f_c=self.config.input.f_c,
+            V_b=self.config.simulation.echo.V_b,
+            target_rcs_db=self.config.simulation.echo.target_rcs_db,
+            rand_target=self.config.simulation.echo.rand_target,
+            target_position=self.config.simulation.echo.target_position,
+            target_limits=self.config.simulation.echo.target_limits,
+            Tx_position=self.config.simulation.transmitter_position,
+            Rx_position=self.config.simulation.radar_position,
+        )
+
+        clutter = clutter_generator.generate(reference)
+        echo, doppler_hz = echo_generator.generate(reference)
+
+        if self.config.simulation.direct_signal:
+            surveillance = np.asarray(clutter + echo + reference, dtype=np.complex128)
+        else:
+            surveillance = np.asarray(clutter + echo, dtype=np.complex128)
+
+        clutter_positions = getattr(clutter_generator, "clutter_positions", None)
+        if clutter_positions is not None:
+            clutter_positions = np.asarray(clutter_positions, dtype=float)
+        elif self.config.simulation.clutter.clutter_positions is not None:
+            clutter_positions = np.asarray(
+                self.config.simulation.clutter.clutter_positions, dtype=float
             )
 
-            clutter = clutter_generator.generate(reference)
-            echo, doppler_hz = echo_generator.generate(reference)
-            if self.config.simulation.direct_signal:
-                surveillance = np.asarray(
-                    clutter + echo + reference, dtype=np.complex128
-                )
-            else:
-                surveillance = np.asarray(clutter + echo, dtype=np.complex128)
+        target_position = getattr(echo_generator, "target_position", None)
+        if target_position is None:
+            target_position = getattr(echo_generator, "target_positions", None)
+
+        if target_position is not None:
+            target_position = np.asarray(target_position, dtype=float)
+            if target_position.ndim == 2 and target_position.shape[0] == 1:
+                target_position = target_position[0]
+        else:
+            target_position = np.asarray(
+                self.config.simulation.echo.target_position, dtype=float
+            )
 
         self.state.inputs = InputState(
             reference=reference,
             surveillance=surveillance,
             source_mode="simulated",
             original_length=len(reference),
-            metadata={"seed": self.config.input.seed},
         )
         self.state.simulation = SimulationState(
             clutter=np.asarray(clutter, dtype=np.complex128),
             echo=np.asarray(echo, dtype=np.complex128),
-            doppler_hz=float(doppler_hz),
+            doppler_hz=float(doppler_hz) if doppler_hz is not None else None,
+            clutter_positions=clutter_positions,
+            target_position=target_position,
             metadata={
                 "transmitter_position": np.asarray(
                     self.config.simulation.transmitter_position
@@ -558,9 +564,7 @@ class PassiveRadarChain:
                 "radar_position": np.asarray(
                     self.config.simulation.radar_position
                 ).tolist(),
-                "target_position": np.asarray(
-                    self.config.simulation.echo.target_position
-                ).tolist(),
+                "target_position": np.asarray(target_position).tolist(),
             },
         )
         self._external_inputs_were_set = False
@@ -950,6 +954,14 @@ class PassiveRadarChain:
                 arrays["simulation_clutter"] = self.state.simulation.clutter
             if self.state.simulation.echo is not None:
                 arrays["simulation_echo"] = self.state.simulation.echo
+            if self.state.simulation.clutter_positions is not None:
+                arrays["simulation_clutter_positions"] = (
+                    self.state.simulation.clutter_positions
+                )
+            if self.state.simulation.target_position is not None:
+                arrays["simulation_target_position"] = (
+                    self.state.simulation.target_position
+                )
             meta["simulation"] = {
                 "doppler_hz": self.state.simulation.doppler_hz,
                 "metadata": _jsonify(self.state.simulation.metadata),
@@ -1059,6 +1071,12 @@ class PassiveRadarChain:
                     if "simulation_echo" in npz
                     else None,
                     doppler_hz=meta["simulation"].get("doppler_hz"),
+                    clutter_positions=np.asarray(npz["simulation_clutter_positions"])
+                    if "simulation_clutter_positions" in npz
+                    else None,
+                    target_position=np.asarray(npz["simulation_target_position"])
+                    if "simulation_target_position" in npz
+                    else None,
                     metadata=meta["simulation"].get("metadata", {}),
                 )
 
@@ -1141,6 +1159,221 @@ class PassiveRadarChain:
             ax.set_xlim(*xlim)
         if ylim is not None:
             ax.set_ylim(*ylim)
+
+    def plot_scenario_geometry(
+        self,
+        scale: float = 1.0,
+        *,
+        show_velocities: bool = True,
+        arrow_len_px: int = 45,
+        clutter_marker_size: int = 25,
+        show_labels: bool = True,
+        show: bool | None = None,
+        save: bool | None = None,
+        filename: str | None = None,
+        title: str | None = None,
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Grafica la geometría del escenario simulado, incluyendo transmisor,
+        receptor, blanco, clutter y flecha de velocidad del blanco."""
+
+        if scale == 0:
+            raise ValueError("scale must be non-zero.")
+
+        show = self.config.plot.show if show is None else show
+        save = self.config.plot.save if save is None else save
+
+        inputs = self._ensure_inputs_available()
+        if inputs.source_mode != "simulated" or self.state.simulation is None:
+            raise RuntimeError(
+                "plot_scenario_geometry() is only available for simulated inputs."
+            )
+
+        sim_state = self.state.simulation
+
+        fig, ax = plt.subplots(figsize=self.config.plot.figsize)
+
+        # -----------------------------
+        # Posiciones base
+        # -----------------------------
+        P_tx = (
+            np.asarray(
+                self.config.simulation.transmitter_position, dtype=float
+            ).reshape(2)
+            / scale
+        )
+
+        P_rx = (
+            np.asarray(self.config.simulation.radar_position, dtype=float).reshape(2)
+            / scale
+        )
+
+        if sim_state.target_position is not None:
+            P_tgt = np.asarray(sim_state.target_position, dtype=float)
+        else:
+            P_tgt = np.asarray(self.config.simulation.echo.target_position, dtype=float)
+
+        if P_tgt.ndim == 2 and P_tgt.shape[0] == 1:
+            P_tgt = P_tgt[0]
+        if P_tgt.shape != (2,):
+            raise ValueError(f"target_position must be shape (2,). Got {P_tgt.shape}")
+        P_tgt = P_tgt / scale
+
+        if sim_state.clutter_positions is None:
+            P_cl = np.empty((0, 2), dtype=float)
+        else:
+            P_cl = np.asarray(sim_state.clutter_positions, dtype=float)
+
+        if P_cl.size == 0:
+            P_cl = np.empty((0, 2), dtype=float)
+        elif P_cl.ndim != 2 or P_cl.shape[1] != 2:
+            raise ValueError(
+                f"clutter_positions must be shape (N, 2). Got {P_cl.shape}"
+            )
+        else:
+            P_cl = P_cl / scale
+
+        # -----------------------------
+        # Plot clutter
+        # -----------------------------
+        if P_cl.size > 0:
+            ax.scatter(
+                P_cl[:, 0],
+                P_cl[:, 1],
+                s=clutter_marker_size,
+                marker=".",
+                label=f"Clutter (N={P_cl.shape[0]})",
+                zorder=2,
+            )
+
+        # -----------------------------
+        # Plot Tx / Rx / Target
+        # -----------------------------
+        ax.scatter(
+            P_tx[0],
+            P_tx[1],
+            marker="^",
+            s=120,
+            label=f"Tx ({P_tx[0]:.1f}, {P_tx[1]:.1f})" if show_labels else "Tx",
+            zorder=5,
+        )
+        ax.scatter(
+            P_rx[0],
+            P_rx[1],
+            marker="s",
+            s=120,
+            label=f"Rx ({P_rx[0]:.1f}, {P_rx[1]:.1f})" if show_labels else "Rx",
+            zorder=5,
+        )
+        ax.scatter(
+            P_tgt[0],
+            P_tgt[1],
+            color="red",
+            marker="x",
+            s=140,
+            label=f"Target ({P_tgt[0]:.1f}, {P_tgt[1]:.1f})"
+            if show_labels
+            else "Target",
+            zorder=6,
+        )
+
+        # Necesario para que transformaciones data<->pixel sean válidas
+        fig.canvas.draw()
+
+        # -----------------------------
+        # Helper: flecha de velocidad de tamaño visual constante
+        # -----------------------------
+        def _draw_velocity_arrow(
+            P0_data: np.ndarray,
+            V_vec: np.ndarray | list[float] | tuple[float, float],
+            *,
+            color: str,
+            name: str,
+        ) -> None:
+            V = np.asarray(V_vec, dtype=float).reshape(-1)
+            if V.shape != (2,):
+                return
+
+            vmag = float(np.linalg.norm(V))
+            if np.isclose(vmag, 0.0):
+                return
+
+            U = V / vmag
+
+            p0 = ax.transData.transform(P0_data)
+            p1 = p0 + arrow_len_px * U
+            p1_data = ax.transData.inverted().transform(p1)
+
+            ax.annotate(
+                "",
+                xy=p1_data,
+                xytext=P0_data,
+                arrowprops=dict(arrowstyle="->", linewidth=2, color=color),
+                zorder=7,
+            )
+
+            if show_labels:
+                label_offset_px = 12
+                p_label = p1 + label_offset_px * U
+                p_label_data = ax.transData.inverted().transform(p_label)
+
+                ax.text(
+                    p_label_data[0],
+                    p_label_data[1],
+                    f"{name}: {vmag:.2f} m/s",
+                    color=color,
+                    ha="left",
+                    va="bottom",
+                    zorder=8,
+                )
+
+        # -----------------------------
+        # Velocidad del blanco
+        # -----------------------------
+        if show_velocities:
+            _draw_velocity_arrow(
+                P_tgt,
+                self.config.simulation.echo.V_b,
+                color="red",
+                name="Vb",
+            )
+
+        # -----------------------------
+        # Estética
+        # -----------------------------
+        ax.set_aspect("equal", adjustable="datalim")
+        ax.grid(True, alpha=0.3)
+
+        if scale == 1.0:
+            unit = "m"
+        elif scale == 1000.0:
+            unit = "km"
+        else:
+            unit = f"m/{scale:g}"
+
+        if title is None:
+            title = f"Scenario geometry (scale={scale:g})"
+
+        ax.set_title(title)
+        ax.set_xlabel(f"x [{unit}]")
+        ax.set_ylabel(f"y [{unit}]")
+
+        handles, labels = ax.get_legend_handles_labels()
+        uniq = dict(zip(labels, handles))
+        ax.legend(uniq.values(), uniq.keys(), loc="best", frameon=True)
+
+        fig.tight_layout()
+
+        if save:
+            output_path = self._prepare_figure_path(
+                filename, stem_prefix="scenario_geometry"
+            )
+            fig.savefig(output_path, bbox_inches="tight")
+            self.logger.info("Scenario geometry figure saved to %s", output_path)
+
+        if show:
+            plt.show()
+
+        return fig, ax
 
     def plot_caf(
         self,
