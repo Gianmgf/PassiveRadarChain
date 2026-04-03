@@ -203,10 +203,16 @@ class PassiveRadarChain:
         verbose: bool | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
-        """Inicializa la cadena de procesamiento con su configuración, estado interno y sistema de logging."""
+        """Inicializa la cadena de procesamiento con su configuración, estado
+        interno, sistema de logging y posibles overrides para la CAF."""
         self.config = config or PassiveRadarChainConfig()
         self.state = PipelineState()
         self._external_inputs_were_set = False
+
+        # Override opcional de la referencia que entra a la CAF.
+        self._caf_reference_override: np.ndarray | None = None
+        self._caf_reference_override_metadata: dict[str, Any] = {}
+
         self.logger = logger or logging.getLogger(
             f"{__name__}.{self.__class__.__name__}"
         )
@@ -228,12 +234,12 @@ class PassiveRadarChain:
 
     def _configure_logger(self, verbose: bool | None = None) -> None:
         """Configura el logger interno si no fue configurado externamente."""
-
         if not self.logger.handlers:
             handler = logging.StreamHandler()
             formatter = logging.Formatter("[%(levelname)s] %(name)s: %(message)s")
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
+
         self.logger.propagate = False
         if verbose is None:
             self.logger.setLevel(logging.INFO)
@@ -273,11 +279,26 @@ class PassiveRadarChain:
         """Devuelve el índice ordinal asociado a una etapa de la cadena."""
         return self._STAGE_ORDER.index(stage)
 
-    def _mark_completed(self, stage: StageName) -> None:
-        """Marca una etapa como completada y actualiza el estado de disponibilidad de las etapas previas."""
+    def _stage_state_map(self) -> dict[str, Any]:
+        """Devuelve un mapeo entre nombres públicos de etapa y su estado actual."""
+        return {
+            "inputs": self.state.inputs,
+            "simulation": self.state.simulation,
+            "channel": self.state.channel,
+            "filter": self.state.filter,
+            "window": self.state.window,
+            "caf": self.state.caf,
+            "detection": self.state.detection,
+        }
+
+    def _finalize_stage(self, stage: StageName) -> None:
+        """Marca la etapa como completada, actualiza las previas, guarda su snapshot y actualiza el último estado válido."""
+        stage_idx = self._stage_index(stage)
         for known_stage in self._STAGE_ORDER:
-            if self._stage_index(known_stage) <= self._stage_index(stage):
+            if self._stage_index(known_stage) <= stage_idx:
                 self.state.completed_stages[known_stage] = True
+
+        self._store_stage_snapshot(stage)
         self.state.last_completed_stage = stage
 
     def _store_stage_snapshot(self, stage: StageName) -> None:
@@ -297,24 +318,44 @@ class PassiveRadarChain:
                     "desired_mode": desired_mode,
                 }
             )
-        if stage == "window":
-            return _jsonify(asdict(self.config.window))
+
         if stage == "channel":
             return _jsonify(asdict(self.config.channel))
+
+        if stage == "window":
+            return _jsonify(asdict(self.config.window))
+
         if stage == "filter":
             return _jsonify(asdict(self.config.filter))
+
         if stage == "caf":
-            return _jsonify(asdict(self.config.caf))
+            return _jsonify(
+                {
+                    "caf": asdict(self.config.caf),
+                    "reference_override": {
+                        "active": self._caf_reference_override is not None,
+                        "length": (
+                            None
+                            if self._caf_reference_override is None
+                            else int(len(self._caf_reference_override))
+                        ),
+                        "metadata": self._caf_reference_override_metadata,
+                    },
+                }
+            )
+
         if stage == "detect":
             return _jsonify(asdict(self.config.cfar))
+
         raise ValueError(f"Unknown stage '{stage}'.")
 
     def _auto_invalidate_if_needed(self, stage: StageName) -> None:
         """Invalida una etapa y las posteriores si detecta cambios en su configuración respecto de la última ejecución."""
-        if stage not in self.state.stage_snapshots:
-            return
-        current = self._stage_snapshot(stage)
         previous = self.state.stage_snapshots.get(stage)
+        if previous is None:
+            return
+
+        current = self._stage_snapshot(stage)
         if current != previous:
             self.logger.info(
                 "Configuration changed for stage '%s'; invalidating downstream cache.",
@@ -336,14 +377,15 @@ class PassiveRadarChain:
                 self._external_inputs_were_set = False
             elif known_stage == "channel":
                 self.state.channel = None
-            elif known_stage == "window":
-                self.state.window = None
             elif known_stage == "filter":
                 self.state.filter = None
+            elif known_stage == "window":
+                self.state.window = None
             elif known_stage == "caf":
                 self.state.caf = None
             elif known_stage == "detect":
                 self.state.detection = None
+
             self.state.completed_stages[known_stage] = False
             self.state.stage_snapshots.pop(known_stage, None)
 
@@ -354,66 +396,15 @@ class PassiveRadarChain:
             remaining_completed[-1] if remaining_completed else None
         )
 
-    def reset(self) -> None:
+    def reset(self, *, clear_reconstructed_reference: bool = True) -> None:
         """Reinicia completamente el estado de la cadena manteniendo intacta la configuración actual."""
         self.logger.info("Resetting chain state.")
         self.state = PipelineState()
         self._external_inputs_were_set = False
 
-    def update_input_config(self, **kwargs: Any) -> None:
-        """Actualiza la configuración de entrada e invalida la etapa correspondiente si es necesario."""
-        self._update_dataclass(self.config.input, **kwargs)
-        self._auto_invalidate_if_needed("inputs")
-
-    def update_channel_config(self, **kwargs: Any) -> None:
-        """Actualiza la configuración del bloque "channel" e invalida la etapa correspondiente si es necesario."""
-        self._update_dataclass(self.config.channel, **kwargs)
-        self._auto_invalidate_if_needed("channel")
-
-    def update_simulation_config(self, **kwargs: Any) -> None:
-        """Actualiza la configuración general de simulación e invalida la etapa de entrada si corresponde."""
-        self._update_dataclass(self.config.simulation, **kwargs)
-        self._auto_invalidate_if_needed("inputs")
-
-    def update_clutter_config(self, **kwargs: Any) -> None:
-        """Actualiza la configuración del clutter e invalida la etapa de entrada si corresponde."""
-        self._update_dataclass(self.config.simulation.clutter, **kwargs)
-        self._auto_invalidate_if_needed("inputs")
-
-    def update_echo_config(self, **kwargs: Any) -> None:
-        """Actualiza la configuración del clutter e invalida la etapa de entrada si corresponde."""
-        self._update_dataclass(self.config.simulation.echo, **kwargs)
-        self._auto_invalidate_if_needed("inputs")
-
-    def update_window_config(self, **kwargs: Any) -> None:
-        """Actualiza la configuración del bloque "window" e invalida la etapa de entrada si corresponde."""
-        self._update_dataclass(self.config.window, **kwargs)
-        self._auto_invalidate_if_needed("window")
-
-    def update_filter_config(self, **kwargs: Any) -> None:
-        """Actualiza la configuración del bloque "filter" e invalida la etapa de entrada si corresponde."""
-        self._update_dataclass(self.config.filter, **kwargs)
-        self._auto_invalidate_if_needed("filter")
-
-    def update_caf_config(self, **kwargs: Any) -> None:
-        """Actualiza la configuración del bloque "caf" e invalida la etapa de entrada si corresponde."""
-        self._update_dataclass(self.config.caf, **kwargs)
-        self._auto_invalidate_if_needed("caf")
-
-    def update_cfar_config(self, **kwargs: Any) -> None:
-        """Actualiza la configuración del bloque "detect" e invalida la etapa de entrada si corresponde."""
-        self._update_dataclass(self.config.cfar, **kwargs)
-        self._auto_invalidate_if_needed("detect")
-
-    def update_plot_config(self, **kwargs: Any) -> None:
-        """Actualiza la configuración asociada al graficado de resultados."""
-        self._update_dataclass(self.config.plot, **kwargs)
-
-    def update_io_config(self, **kwargs: Any) -> None:
-        """Actualiza la configuración de entrada/salida y recrea los directorios necesarios si cambia la ruta de salida."""
-        self._update_dataclass(self.config.io, **kwargs)
-        self.output_root = self._resolve_output_root()
-        self._ensure_output_directories()
+        if clear_reconstructed_reference:
+            self._caf_reference_override = None
+            self._caf_reference_override_metadata = {}
 
     def _update_dataclass(self, target: Any, **kwargs: Any) -> None:
         """Asigna valores a un dataclass de configuración y ejecuta su validación posterior si existe."""
@@ -423,9 +414,164 @@ class PassiveRadarChain:
                     f"Unknown configuration field '{key}' for {type(target).__name__}."
                 )
             setattr(target, key, value)
+
         post_init = getattr(target, "__post_init__", None)
         if callable(post_init):
             post_init()
+
+    def update_config(self, section: str, **kwargs: Any) -> None:
+        """Actualiza una sección de configuración y realiza la invalidación necesaria."""
+        section_map: dict[str, tuple[Any, StageName | None]] = {
+            "input": (self.config.input, "inputs"),
+            "channel": (self.config.channel, "channel"),
+            "simulation": (self.config.simulation, "inputs"),
+            "clutter": (self.config.simulation.clutter, "inputs"),
+            "echo": (self.config.simulation.echo, "inputs"),
+            "window": (self.config.window, "window"),
+            "filter": (self.config.filter, "filter"),
+            "caf": (self.config.caf, "caf"),
+            "cfar": (self.config.cfar, "detect"),
+            "plot": (self.config.plot, None),
+            "io": (self.config.io, None),
+        }
+
+        if section not in section_map:
+            raise ValueError(
+                f"Unknown config section '{section}'. Expected one of {tuple(section_map)}."
+            )
+
+        target, stage_to_invalidate = section_map[section]
+        self._update_dataclass(target, **kwargs)
+
+        if section == "io":
+            self.output_root = self._resolve_output_root()
+            self._ensure_output_directories()
+            return
+
+        if stage_to_invalidate is not None:
+            self._auto_invalidate_if_needed(stage_to_invalidate)
+
+    def update_input_config(self, **kwargs: Any) -> None:
+        self.update_config("input", **kwargs)
+
+    def update_channel_config(self, **kwargs: Any) -> None:
+        self.update_config("channel", **kwargs)
+
+    def update_simulation_config(self, **kwargs: Any) -> None:
+        self.update_config("simulation", **kwargs)
+
+    def update_clutter_config(self, **kwargs: Any) -> None:
+        self.update_config("clutter", **kwargs)
+
+    def update_echo_config(self, **kwargs: Any) -> None:
+        self.update_config("echo", **kwargs)
+
+    def update_window_config(self, **kwargs: Any) -> None:
+        self.update_config("window", **kwargs)
+
+    def update_filter_config(self, **kwargs: Any) -> None:
+        self.update_config("filter", **kwargs)
+
+    def update_caf_config(self, **kwargs: Any) -> None:
+        self.update_config("caf", **kwargs)
+
+    def update_cfar_config(self, **kwargs: Any) -> None:
+        self.update_config("cfar", **kwargs)
+
+    def update_plot_config(self, **kwargs: Any) -> None:
+        self.update_config("plot", **kwargs)
+
+    def update_io_config(self, **kwargs: Any) -> None:
+        self.update_config("io", **kwargs)
+
+    def _drop_reconstructed_reference_if_incompatible(
+        self, expected_length: int
+    ) -> None:
+        """Borra el override de referencia si su longitud no es compatible con las señales actuales."""
+        if self._caf_reference_override is None:
+            return
+
+        if len(self._caf_reference_override) != expected_length:
+            self.logger.warning(
+                "Clearing reconstructed reference override because its length (%d) "
+                "does not match the current input length (%d).",
+                len(self._caf_reference_override),
+                expected_length,
+            )
+            self._caf_reference_override = None
+            self._caf_reference_override_metadata = {}
+            self.invalidate_from("caf")
+
+    def set_reconstructed_reference(
+        self,
+        reference: np.ndarray | list[complex] | tuple[complex, ...],
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Define una señal de referencia reconstruida para reemplazar la entrada
+        de referencia del bloque CAF.
+
+        La señal se usa directamente en `compute_caf()` en lugar de la salida del
+        bloque `window`.
+        """
+        ref = _as_complex_1d(reference, "reconstructed_reference")
+
+        if self.state.inputs is not None and len(ref) != len(
+            self.state.inputs.reference
+        ):
+            raise ValueError(
+                "reconstructed_reference must have the same length as the current input signals. "
+                f"Got {len(ref)} and {len(self.state.inputs.reference)}."
+            )
+
+        self._caf_reference_override = ref
+        self._caf_reference_override_metadata = metadata or {}
+        self.invalidate_from("caf")
+        self.logger.info(
+            "Reconstructed reference set successfully (length=%d).", len(ref)
+        )
+
+    def clear_reconstructed_reference(self) -> None:
+        """Elimina el override de referencia reconstruida y vuelve a usar la rama normal hacia la CAF."""
+        if self._caf_reference_override is None:
+            return
+
+        self._caf_reference_override = None
+        self._caf_reference_override_metadata = {}
+        self.invalidate_from("caf")
+        self.logger.info("Reconstructed reference cleared.")
+
+    # Alias más genérico, por comodidad.
+    set_caf_reference = set_reconstructed_reference
+    clear_caf_reference = clear_reconstructed_reference
+
+    def load_reconstructed_reference(
+        self,
+        path: str | Path,
+        *,
+        key: str = "reference",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Carga una referencia reconstruida desde un archivo .npz y la utiliza como override para la CAF."""
+        path = Path(path).expanduser().resolve()
+        with np.load(path, allow_pickle=False) as npz:
+            if key not in npz:
+                raise KeyError(
+                    f"The reconstructed reference file must contain an array named '{key}'."
+                )
+            ref = npz[key]
+
+        merged_metadata = {"loaded_from": str(path), "key": key}
+        if metadata:
+            merged_metadata.update(metadata)
+
+        self.set_reconstructed_reference(ref, metadata=merged_metadata)
+
+    def _get_reference_for_caf(self, fallback_reference: np.ndarray) -> np.ndarray:
+        """Devuelve la referencia que se utilizará en la CAF."""
+        if self._caf_reference_override is not None:
+            return self._caf_reference_override
+        return fallback_reference
 
     def set_inputs(
         self,
@@ -450,6 +596,8 @@ class PassiveRadarChain:
             self.config.input.f_c = f_c
         self.config.input.use_simulated_data = False
 
+        self._drop_reconstructed_reference_if_incompatible(len(ref))
+
         self.state.inputs = InputState(
             reference=ref,
             surveillance=surv,
@@ -459,10 +607,9 @@ class PassiveRadarChain:
         )
         self.state.simulation = None
         self._external_inputs_were_set = True
+
         self.invalidate_from("channel")
-        self.state.completed_stages["inputs"] = True
-        self._store_stage_snapshot("inputs")
-        self.state.last_completed_stage = "inputs"
+        self._finalize_stage("inputs")
         self.logger.info("External inputs set successfully (length=%d).", len(ref))
 
     def load_inputs(self, path: str | Path) -> None:
@@ -477,6 +624,7 @@ class PassiveRadarChain:
             surv = npz["surveillance"]
             fs = float(npz["fs"]) if "fs" in npz else None
             f_c = float(npz["f_c"]) if "f_c" in npz else None
+
         self.set_inputs(ref, surv, fs=fs, f_c=f_c, metadata={"loaded_from": str(path)})
 
     def simulate_inputs(self, reference: np.ndarray | None = None) -> InputState:
@@ -492,6 +640,8 @@ class PassiveRadarChain:
             )
         else:
             reference = np.asarray(reference, dtype=np.complex128)
+
+        self._drop_reconstructed_reference_if_incompatible(len(reference))
 
         clutter_generator = ClutterGenerator(
             fs=self.config.input.fs,
@@ -546,8 +696,8 @@ class PassiveRadarChain:
             )
 
         self.state.inputs = InputState(
-            reference=reference,
-            surveillance=surveillance,
+            reference=np.asarray(reference, dtype=np.complex128),
+            surveillance=np.asarray(surveillance, dtype=np.complex128),
             source_mode="simulated",
             original_length=len(reference),
         )
@@ -567,26 +717,22 @@ class PassiveRadarChain:
                 "target_position": np.asarray(target_position).tolist(),
             },
         )
+
         self._external_inputs_were_set = False
         self.invalidate_from("channel")
-        self.state.completed_stages["inputs"] = True
-        self._store_stage_snapshot("inputs")
-        self.state.last_completed_stage = "inputs"
+        self._finalize_stage("inputs")
         return self.state.inputs
 
     def _ensure_inputs_available(self) -> InputState:
         """Garantiza que existan señales de entrada disponibles, ya sea cargadas externamente o simuladas."""
         self._auto_invalidate_if_needed("inputs")
+
         if self.state.inputs is not None:
             return self.state.inputs
+
         if self.config.input.use_simulated_data:
             return self.simulate_inputs()
-        if self._external_inputs_were_set:
-            if self.state.inputs is None:
-                raise RuntimeError(
-                    "External inputs were indicated but are not available in state."
-                )
-            return self.state.inputs
+
         raise RuntimeError(
             "No inputs are available. Use set_inputs(), load_inputs(), or enable simulated inputs."
         )
@@ -605,6 +751,7 @@ class PassiveRadarChain:
             self.config.channel.add_noise,
         )
 
+        noise: tuple[np.ndarray, np.ndarray] | np.ndarray | None = None
         if self.config.channel.enable:
             surv_ch, ref_ch, noise = apply_noise_and_channel(
                 surv=inputs.surveillance,
@@ -615,8 +762,8 @@ class PassiveRadarChain:
                 channel_response=self.config.channel.channel_response,
             )
         else:
-            surv_ch = inputs.surveillance.copy()
-            ref_ch = inputs.reference.copy()
+            surv_ch = inputs.surveillance
+            ref_ch = inputs.reference
 
         self.state.channel = ChannelState(
             reference_ch=np.asarray(ref_ch, dtype=np.complex128),
@@ -628,12 +775,9 @@ class PassiveRadarChain:
                 if self.config.channel.add_noise
                 else None
             ),
-            noise_added=(noise if self.config.channel.add_noise else None),
+            noise_added=noise if self.config.channel.add_noise else None,
         )
-
-        self.state.completed_stages["channel"] = True
-        self._store_stage_snapshot("channel")
-        self.state.last_completed_stage = "channel"
+        self._finalize_stage("channel")
         return self.state.channel
 
     def apply_filter(self) -> FilterState:
@@ -654,16 +798,14 @@ class PassiveRadarChain:
                 order=self.config.filter.order,
             )
         else:
-            filtered = channel_state.surveillance_ch.copy()
+            filtered = channel_state.surveillance_ch
 
         self.state.filter = FilterState(
             surveillance=np.asarray(filtered, dtype=np.complex128),
             applied=bool(self.config.filter.enabled),
             order=int(self.config.filter.order),
         )
-        self.state.completed_stages["filter"] = True
-        self._store_stage_snapshot("filter")
-        self.state.last_completed_stage = "filter"
+        self._finalize_stage("filter")
         return self.state.filter
 
     def apply_window(self) -> WindowState:
@@ -672,20 +814,20 @@ class PassiveRadarChain:
         if self.state.window is not None:
             return self.state.window
 
-        inputs = self.apply_channel()
+        channel_state = self.apply_channel()
 
         self.logger.info(
             "Running window stage (enabled=%s).", self.config.window.enabled
         )
         if self.config.window.enabled:
             ref_w = apply_w(
-                inputs.reference_ch,
+                channel_state.reference_ch,
                 beta=self.config.window.beta,
                 freq=self.config.window.freq,
                 range=self.config.window.range,
             )
         else:
-            ref_w = inputs.reference_ch.copy()
+            ref_w = channel_state.reference_ch
 
         self.state.window = WindowState(
             reference=np.asarray(ref_w, dtype=np.complex128),
@@ -694,9 +836,7 @@ class PassiveRadarChain:
             freq=bool(self.config.window.freq),
             range=bool(self.config.window.range),
         )
-        self.state.completed_stages["window"] = True
-        self._store_stage_snapshot("window")
-        self.state.last_completed_stage = "window"
+        self._finalize_stage("window")
         return self.state.window
 
     def compute_caf(self) -> CAFState:
@@ -705,20 +845,34 @@ class PassiveRadarChain:
         if self.state.caf is not None:
             return self.state.caf
 
-        channel_state = self.apply_channel()
-        window_state = self.apply_window()
         filter_state = self.apply_filter()
+        window_state = self.apply_window()
 
-        self.logger.info("Running CAF stage with batch=%d.", self.config.caf.batch)
+        reference_for_caf = self._get_reference_for_caf(window_state.reference)
+        if len(reference_for_caf) != len(filter_state.surveillance):
+            raise ValueError(
+                "The reference signal used for CAF and the surveillance signal must have the same length. "
+                f"Got {len(reference_for_caf)} and {len(filter_state.surveillance)}."
+            )
+
+        self.logger.info(
+            "Running CAF stage with batch=%d (reference_override=%s).",
+            self.config.caf.batch,
+            self._caf_reference_override is not None,
+        )
+
         caf, freq_axis, range_axis = compute_caf(
             batch=self.config.caf.batch,
             fs=self.config.input.fs,
             surveillance=filter_state.surveillance,
-            reference=window_state.reference,
+            reference=reference_for_caf,
         )
+
+        input_length = int(len(filter_state.surveillance))
         truncated_length = (
-            len(channel_state.reference_ch) // self.config.caf.batch
+            input_length // self.config.caf.batch
         ) * self.config.caf.batch
+
         extent = [
             float(freq_axis[0] / 1e3),
             float(freq_axis[-1] / 1e3),
@@ -731,12 +885,10 @@ class PassiveRadarChain:
             freq_axis=np.asarray(freq_axis),
             range_axis=np.asarray(range_axis),
             extent=extent,
-            input_length=int(len(channel_state.reference_ch)),
+            input_length=input_length,
             truncated_length=int(truncated_length),
         )
-        self.state.completed_stages["caf"] = True
-        self._store_stage_snapshot("caf")
-        self.state.last_completed_stage = "caf"
+        self._finalize_stage("caf")
         return self.state.caf
 
     def run_detection(self) -> DetectionState:
@@ -749,12 +901,13 @@ class PassiveRadarChain:
         self.logger.info(
             "Running detection stage (enabled=%s).", self.config.cfar.enabled
         )
+
         if not self.config.cfar.enabled:
             self.state.detection = DetectionState(
                 detections=None, sigma_est=None, alpha_det=None
             )
         else:
-            result = ca_cfar(
+            detections, sigma_est, alpha_det = ca_cfar(
                 np.abs(caf_state.caf),
                 Nw=self.config.cfar.Nw,
                 Ng=self.config.cfar.Ng,
@@ -762,57 +915,111 @@ class PassiveRadarChain:
                 detection_2d=self.config.cfar.bidimensional,
                 freq_wrap=self.config.cfar.freq_wrap,
             )
-
-            detections, sigma_est, alpha_det = result
             self.state.detection = DetectionState(
                 detections=detections,
                 sigma_est=np.asarray(sigma_est),
                 alpha_det=float(alpha_det),
             )
 
-        self.state.completed_stages["detect"] = True
-        self._store_stage_snapshot("detect")
-        self.state.last_completed_stage = "detect"
+        self._finalize_stage("detect")
         return self.state.detection
 
     def run(
-        self, *, start_from: str = "inputs", stop_at: str = "detect"
+        self,
+        *,
+        start_from: str = "inputs",
+        stop_at: str = "detect",
+        copy_state: bool = True,
     ) -> PipelineState:
-        """Ejecuta la cadena de procesamiento entre dos etapas especificadas, inclusive."""
+        """Ejecuta la cadena de procesamiento entre dos etapas especificadas, inclusive.
+
+        Parameters
+        ----------
+        start_from : str
+            Etapa inicial.
+        stop_at : str
+            Etapa final.
+        copy_state : bool, optional
+            Si es True devuelve una copia profunda del estado.
+            Si es False devuelve el estado interno directo, evitando el costo
+            de `deepcopy` en loops o benchmarking.
+        """
         start = self._validate_stage_name(start_from)
         stop = self._validate_stage_name(stop_at)
+
         if self._stage_index(start) > self._stage_index(stop):
             raise ValueError(
                 f"start_from ('{start}') must come before or equal to stop_at ('{stop}')."
             )
 
+        handlers: dict[StageName, Any] = {
+            "inputs": self._ensure_inputs_available,
+            "channel": self.apply_channel,
+            "filter": self.apply_filter,
+            "window": self.apply_window,
+            "caf": self.compute_caf,
+            "detect": self.run_detection,
+        }
+
         self.logger.info("Running chain from '%s' to '%s'.", start, stop)
         for stage in self._STAGE_ORDER[
             self._stage_index(start) : self._stage_index(stop) + 1
         ]:
-            if stage == "inputs":
-                self._ensure_inputs_available()
-            elif stage == "channel":
-                self.apply_channel()
-            elif stage == "window":
-                self.apply_window()
-            elif stage == "filter":
-                self.apply_filter()
-            elif stage == "caf":
-                self.compute_caf()
-            elif stage == "detect":
-                self.run_detection()
-        return self.get_state()
+            handlers[stage]()
 
-    def run_from(self, stage: str) -> PipelineState:
+        return self.get_state(copy_state=copy_state)
+
+    def run_from(self, stage: str, *, copy_state: bool = True) -> PipelineState:
         """Ejecuta la cadena desde una etapa dada hasta la etapa final de detección."""
-        return self.run(start_from=stage, stop_at="detect")
+        return self.run(start_from=stage, stop_at="detect", copy_state=copy_state)
 
-    def run_until(self, stage: str) -> PipelineState:
+    def run_until(self, stage: str, *, copy_state: bool = True) -> PipelineState:
         """Ejecuta la cadena desde el inicio hasta la etapa indicada."""
-        return self.run(start_from="inputs", stop_at=stage)
+        return self.run(start_from="inputs", stop_at=stage, copy_state=copy_state)
 
     def get_state(
+        self,
+        stage: str | None = None,
+        *,
+        copy_state: bool = True,
+    ) -> (
+        PipelineState
+        | SimulationState
+        | InputState
+        | ChannelState
+        | FilterState
+        | WindowState
+        | CAFState
+        | DetectionState
+        | None
+    ):
+        """Devuelve el estado completo de la cadena o del bloque indicado.
+
+        Parameters
+        ----------
+        stage : str | None
+            Nombre de la etapa. Si es None, devuelve el estado completo.
+        copy_state : bool, optional
+            Si es True devuelve una copia profunda del estado solicitado.
+            Si es False devuelve una referencia directa al estado interno.
+        """
+        if stage is None:
+            return copy.deepcopy(self.state) if copy_state else self.state
+
+        stage_map = self._stage_state_map()
+
+        if stage not in stage_map:
+            self.logger.warning(
+                "Invalid stage '%s'. Must be one of %s. Returning the full pipeline state.",
+                stage,
+                tuple(stage_map.keys()),
+            )
+            return copy.deepcopy(self.state) if copy_state else self.state
+
+        target = stage_map[stage]
+        return copy.deepcopy(target) if copy_state else target
+
+    def peek_state(
         self, stage: str | None = None
     ) -> (
         PipelineState
@@ -825,28 +1032,8 @@ class PassiveRadarChain:
         | DetectionState
         | None
     ):
-        """Devuelve una copia del estado completo de la cadena o del bloque indicado."""
-        if stage is None:
-            return copy.deepcopy(self.state)
-
-        stage_map = {
-            "inputs": self.state.inputs,
-            "simulation": self.state.simulation,
-            "channel": self.state.channel,
-            "filter": self.state.filter,
-            "window": self.state.window,
-            "caf": self.state.caf,
-            "detection": self.state.detection,
-        }
-
-        if stage not in stage_map:
-            self.logger.warning(
-                "Invalid stage '%s'. Must be one of %s. Returning the full pipeline state.",
-                stage,
-            )
-            return copy.deepcopy(self.state)
-
-        return copy.deepcopy(stage_map[stage])
+        """Devuelve una referencia directa al estado interno, sin copiar."""
+        return self.get_state(stage=stage, copy_state=False)
 
     def save_config(
         self,
@@ -854,7 +1041,6 @@ class PassiveRadarChain:
         filename: str | None = None,
     ) -> Path:
         """Guarda la configuración actual de la cadena en un archivo JSON."""
-
         if path is not None:
             path = Path(path)
         else:
@@ -879,8 +1065,10 @@ class PassiveRadarChain:
         self.config = self._config_from_json(path)
         self.output_root = self._resolve_output_root()
         self._ensure_output_directories()
+
         if reset_state:
-            self.reset()
+            self.reset(clear_reconstructed_reference=False)
+
         self.logger.info(
             "Configuration loaded from %s", Path(path).expanduser().resolve()
         )
@@ -891,6 +1079,7 @@ class PassiveRadarChain:
         path = Path(path).expanduser().resolve()
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
+
         return PassiveRadarChainConfig(
             input=InputConfig(**data.get("input", {})),
             channel=ChannelConfig(**data.get("channel", {})),
@@ -919,7 +1108,6 @@ class PassiveRadarChain:
         filename: str | None = None,
     ) -> tuple[Path, Path]:
         """Guarda el estado numérico actual de la cadena en archivos .npz y .json."""
-
         if path is not None:
             stem_path = Path(path)
         else:
@@ -939,6 +1127,12 @@ class PassiveRadarChain:
             "last_completed_stage": self.state.last_completed_stage,
             "external_inputs_were_set": self._external_inputs_were_set,
         }
+
+        if self._caf_reference_override is not None:
+            arrays["caf_reference_override"] = self._caf_reference_override
+            meta["caf_reference_override"] = {
+                "metadata": _jsonify(self._caf_reference_override_metadata)
+            }
 
         if self.state.inputs is not None:
             arrays["inputs_reference"] = self.state.inputs.reference
@@ -962,6 +1156,7 @@ class PassiveRadarChain:
                 arrays["simulation_target_position"] = (
                     self.state.simulation.target_position
                 )
+
             meta["simulation"] = {
                 "doppler_hz": self.state.simulation.doppler_hz,
                 "metadata": _jsonify(self.state.simulation.metadata),
@@ -972,11 +1167,22 @@ class PassiveRadarChain:
                 arrays["channel_reference"] = self.state.channel.reference_ch
             if self.state.channel.surveillance_ch is not None:
                 arrays["channel_surveillance"] = self.state.channel.surveillance_ch
+
             meta["channel"] = {
                 "applied": self.state.channel.applied,
                 "add_noise": self.state.channel.add_noise,
                 "noise_power_db": self.state.channel.noise_power_db,
             }
+
+            if self.state.channel.noise_added is not None:
+                noise = self.state.channel.noise_added
+                if isinstance(noise, tuple):
+                    arrays["channel_noise_0"] = np.asarray(noise[0])
+                    arrays["channel_noise_1"] = np.asarray(noise[1])
+                    meta["channel"]["noise_kind"] = "tuple"
+                else:
+                    arrays["channel_noise"] = np.asarray(noise)
+                    meta["channel"]["noise_kind"] = "array"
 
         if self.state.window is not None:
             arrays["window_reference"] = self.state.window.reference
@@ -1054,6 +1260,17 @@ class PassiveRadarChain:
                 meta.get("external_inputs_were_set", False)
             )
 
+            if "caf_reference_override" in npz:
+                self._caf_reference_override = np.asarray(
+                    npz["caf_reference_override"], dtype=np.complex128
+                )
+                self._caf_reference_override_metadata = meta.get(
+                    "caf_reference_override", {}
+                ).get("metadata", {})
+            else:
+                self._caf_reference_override = None
+                self._caf_reference_override_metadata = {}
+
             if "inputs" in meta:
                 self.state.inputs = InputState(
                     reference=np.asarray(npz["inputs_reference"]),
@@ -1062,6 +1279,7 @@ class PassiveRadarChain:
                     original_length=int(meta["inputs"]["original_length"]),
                     metadata=meta["inputs"].get("metadata", {}),
                 )
+
             if "simulation" in meta:
                 self.state.simulation = SimulationState(
                     clutter=np.asarray(npz["simulation_clutter"])
@@ -1081,6 +1299,17 @@ class PassiveRadarChain:
                 )
 
             if "channel" in meta:
+                noise_added: tuple[np.ndarray, np.ndarray] | np.ndarray | None = None
+                noise_kind = meta["channel"].get("noise_kind")
+
+                if noise_kind == "tuple":
+                    noise_added = (
+                        np.asarray(npz["channel_noise_0"]),
+                        np.asarray(npz["channel_noise_1"]),
+                    )
+                elif noise_kind == "array":
+                    noise_added = np.asarray(npz["channel_noise"])
+
                 self.state.channel = ChannelState(
                     reference_ch=np.asarray(npz["channel_reference"])
                     if "channel_reference" in npz
@@ -1091,6 +1320,7 @@ class PassiveRadarChain:
                     applied=bool(meta["channel"].get("applied", False)),
                     add_noise=bool(meta["channel"].get("add_noise", False)),
                     noise_power_db=meta["channel"].get("noise_power_db"),
+                    noise_added=noise_added,
                 )
 
             if "window" in meta:
@@ -1101,12 +1331,14 @@ class PassiveRadarChain:
                     freq=bool(meta["window"]["freq"]),
                     range=bool(meta["window"]["range"]),
                 )
+
             if "filter" in meta:
                 self.state.filter = FilterState(
                     surveillance=np.asarray(npz["filter_surveillance"]),
                     applied=bool(meta["filter"]["applied"]),
                     order=int(meta["filter"]["order"]),
                 )
+
             if "caf" in meta:
                 self.state.caf = CAFState(
                     caf=np.asarray(npz["caf_matrix"]),
@@ -1116,9 +1348,11 @@ class PassiveRadarChain:
                     input_length=int(meta["caf"]["input_length"]),
                     truncated_length=int(meta["caf"]["truncated_length"]),
                 )
+
             if "detection" in meta:
                 kind = meta["detection"].get("kind", "none")
                 detections: tuple[np.ndarray, np.ndarray] | np.ndarray | None
+
                 if kind == "tuple":
                     detections = (
                         np.asarray(npz["detection_rows"]),
@@ -1128,6 +1362,7 @@ class PassiveRadarChain:
                     detections = np.asarray(npz["detection_indices"])
                 else:
                     detections = None
+
                 self.state.detection = DetectionState(
                     detections=detections,
                     sigma_est=np.asarray(npz["detection_sigma_est"])
@@ -1135,6 +1370,7 @@ class PassiveRadarChain:
                     else None,
                     alpha_det=meta["detection"].get("alpha_det"),
                 )
+
         self.logger.info("State loaded from %s and %s", npz_path, meta_path)
 
     def _prepare_figure_path(self, filename: str | None, stem_prefix: str) -> Path:
@@ -1160,6 +1396,71 @@ class PassiveRadarChain:
         if ylim is not None:
             ax.set_ylim(*ylim)
 
+    def _normalize_detection_indices(
+        self, detections: tuple[np.ndarray, np.ndarray] | np.ndarray | None
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        """Normaliza el formato de detecciones a dos vectores: filas y columnas."""
+        if detections is None:
+            return None
+
+        if isinstance(detections, tuple):
+            rows = np.asarray(detections[0])
+            cols = np.asarray(detections[1])
+
+            if rows.shape != cols.shape:
+                raise ValueError(
+                    "Detection rows and cols must have the same shape. "
+                    f"Got {rows.shape} and {cols.shape}."
+                )
+
+            if rows.size == 0:
+                return None
+
+            return rows, cols
+
+        arr = np.asarray(detections)
+        if arr.size == 0:
+            return None
+
+        if arr.ndim == 1:
+            if arr.shape[0] != 2:
+                raise ValueError(
+                    "detections as a 1D array must have shape (2,), with [row, col]."
+                )
+            arr = arr[None, :]
+
+        if arr.ndim != 2 or arr.shape[1] != 2:
+            raise ValueError(
+                "detections must have shape (N, 2) or be a tuple of (rows, cols)."
+            )
+
+        return arr[:, 0], arr[:, 1]
+
+    def _overlay_detections_on_caf(
+        self,
+        ax: plt.Axes,
+        *,
+        caf_shape: tuple[int, int],
+        extent: list[float],
+        detections: tuple[np.ndarray, np.ndarray] | np.ndarray | None,
+    ) -> None:
+        """Superpone detecciones sobre el gráfico de la CAF."""
+        normalized = self._normalize_detection_indices(detections)
+        if normalized is None:
+            return
+
+        rows, cols = normalized
+        ny, nx = caf_shape
+        xmin, xmax, ybottom, ytop = extent
+
+        dx = (xmax - xmin) / nx
+        dy = (ybottom - ytop) / ny
+
+        x = xmin + (cols + 0.5) * dx
+        y = ytop + (rows + 0.5) * dy
+
+        ax.plot(x, y, linestyle="None", marker="o", color="r", markersize=8)
+
     def plot_scenario_geometry(
         self,
         scale: float = 1.0,
@@ -1175,7 +1476,6 @@ class PassiveRadarChain:
     ) -> tuple[plt.Figure, plt.Axes]:
         """Grafica la geometría del escenario simulado, incluyendo transmisor,
         receptor, blanco, clutter y flecha de velocidad del blanco."""
-
         if scale == 0:
             raise ValueError("scale must be non-zero.")
 
@@ -1189,19 +1489,14 @@ class PassiveRadarChain:
             )
 
         sim_state = self.state.simulation
-
         fig, ax = plt.subplots(figsize=self.config.plot.figsize)
 
-        # -----------------------------
-        # Posiciones base
-        # -----------------------------
         P_tx = (
             np.asarray(
                 self.config.simulation.transmitter_position, dtype=float
             ).reshape(2)
             / scale
         )
-
         P_rx = (
             np.asarray(self.config.simulation.radar_position, dtype=float).reshape(2)
             / scale
@@ -1232,9 +1527,6 @@ class PassiveRadarChain:
         else:
             P_cl = P_cl / scale
 
-        # -----------------------------
-        # Plot clutter
-        # -----------------------------
         if P_cl.size > 0:
             ax.scatter(
                 P_cl[:, 0],
@@ -1245,9 +1537,6 @@ class PassiveRadarChain:
                 zorder=2,
             )
 
-        # -----------------------------
-        # Plot Tx / Rx / Target
-        # -----------------------------
         ax.scatter(
             P_tx[0],
             P_tx[1],
@@ -1276,12 +1565,8 @@ class PassiveRadarChain:
             zorder=6,
         )
 
-        # Necesario para que transformaciones data<->pixel sean válidas
         fig.canvas.draw()
 
-        # -----------------------------
-        # Helper: flecha de velocidad de tamaño visual constante
-        # -----------------------------
         def _draw_velocity_arrow(
             P0_data: np.ndarray,
             V_vec: np.ndarray | list[float] | tuple[float, float],
@@ -1298,7 +1583,6 @@ class PassiveRadarChain:
                 return
 
             U = V / vmag
-
             p0 = ax.transData.transform(P0_data)
             p1 = p0 + arrow_len_px * U
             p1_data = ax.transData.inverted().transform(p1)
@@ -1326,9 +1610,6 @@ class PassiveRadarChain:
                     zorder=8,
                 )
 
-        # -----------------------------
-        # Velocidad del blanco
-        # -----------------------------
         if show_velocities:
             _draw_velocity_arrow(
                 P_tgt,
@@ -1337,9 +1618,6 @@ class PassiveRadarChain:
                 name="Vb",
             )
 
-        # -----------------------------
-        # Estética
-        # -----------------------------
         ax.set_aspect("equal", adjustable="datalim")
         ax.grid(True, alpha=0.3)
 
@@ -1383,7 +1661,7 @@ class PassiveRadarChain:
         filename: str | None = None,
         title: str | None = None,
         db: bool | None = None,
-        detections: tuple | None = None,
+        detections: tuple[np.ndarray, np.ndarray] | np.ndarray | None = None,
         **imshow_kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
         """Grafica la CAF actual, opcionalmente superpone detecciones y permite mostrar o guardar la figura."""
@@ -1401,31 +1679,29 @@ class PassiveRadarChain:
             cmap=self.config.plot.cmap,
             **imshow_kwargs,
         )
+
         if title is not None:
             ax.set_title(title)
+
         self._apply_axes_limits(
             ax, xlim=self.config.plot.xlim, ylim=self.config.plot.ylim
         )
 
-        if detections is not None and isinstance(detections, tuple):
-            ny, nx = caf_state.caf.shape
-            xmin, xmax, ybottom, ytop = caf_state.extent
-
-            rows, cols = detections
-            dx = (xmax - xmin) / nx
-            dy = (ybottom - ytop) / ny
-
-            x = xmin + (cols + 0.5) * dx
-            y = ytop + (rows + 0.5) * dy
-
-            ax.plot(x, y, linestyle="None", marker="o", color="r", markersize=8)
+        self._overlay_detections_on_caf(
+            ax,
+            caf_shape=caf_state.caf.shape,
+            extent=caf_state.extent,
+            detections=detections,
+        )
 
         if save:
             output_path = self._prepare_figure_path(filename, stem_prefix="caf")
             fig.savefig(output_path, bbox_inches="tight")
             self.logger.info("CAF figure saved to %s", output_path)
+
         if show:
             plt.show()
+
         return fig, ax
 
     def plot_detections(
@@ -1443,20 +1719,19 @@ class PassiveRadarChain:
         show = self.config.plot.show if show is None else show
         save = self.config.plot.save if save is None else save
 
-        base_title = title or "Cross-Ambiguity Function with Detections"
-        detections = detection_state.detections
         fig, ax = self.plot_caf(
             show=False,
             save=False,
-            title=base_title,
+            title=title or "Cross-Ambiguity Function with Detections",
             db=db,
-            detections=detections,
+            detections=detection_state.detections,
             **imshow_kwargs,
         )
 
         self._apply_axes_limits(
             ax, xlim=self.config.plot.xlim, ylim=self.config.plot.ylim
         )
+
         if title is not None:
             ax.set_title(title)
 
@@ -1464,6 +1739,8 @@ class PassiveRadarChain:
             output_path = self._prepare_figure_path(filename, stem_prefix="detections")
             fig.savefig(output_path, bbox_inches="tight")
             self.logger.info("Detection figure saved to %s", output_path)
+
         if show:
             plt.show()
+
         return fig, ax

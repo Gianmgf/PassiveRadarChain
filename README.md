@@ -22,8 +22,8 @@ El repositorio incluye:
 ### 1. Clonar el repositorio
 
 ```bash
-git clone https://github.com/tu-usuario/tu-repo.git
-cd tu-repo
+git clone https://github.com/Gianmgf/PassiveRadarChain
+cd PassiveRadarChain
 ```
 ### 2. Crear el entorno Conda
 ```bash

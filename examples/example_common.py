@@ -31,44 +31,51 @@ def build_example_config(
     """
     return PassiveRadarChainConfig(
         input=InputConfig(
-            N=120_000,
-            fs=8e6,
-            f_c=700e6,
-            seed=seed,
-            use_simulated_data=True,
+            N=1_000_000, fs=8126984.0, f_c=700e6, use_simulated_data=True
         ),
         simulation=SimulationConfig(
             transmitter_position=[0.0, 0.0],
-            radar_position=[70.0, 150.0],
+            radar_position=[50.0, 500.0],
+            direct_signal=True,
             clutter=ClutterConfig(
-                N_CLUTT=12,
-                clutter_rcs_min_db=0.0,
-                clutter_rcs_max_db=0.0,
+                N_CLUTT=10,
+                clutter_rcs_min_db=-3.0,
+                clutter_rcs_max_db=-5.0,
                 rand_clutter=True,
-                clutter_limits=[-10, 500, 5, 150],
+                clutter_limits=[-100, 2000, 5, 150],
             ),
             echo=EchoConfig(
                 V_b=[10.0, 100.0],
                 rand_target=False,
-                target_rcs_db=-3.0,
-                target_position=[20.0, 220.0],
+                target_rcs_db=-15.0,
+                target_position=[2500.0, 120.0],
             ),
         ),
-        channel=ChannelConfig(enable=True, add_noise=False),
-        filter=FilterConfig(enabled=True, order=30),
-        window=WindowConfig(enabled=True, beta=(14.0, 14.0), freq=True, range=False),
-        caf=CAFConfig(batch=200),
+        channel=ChannelConfig(
+            enable=True,
+            add_noise=True,
+            noise_on_both_channels=True,
+            noise_power_db=1,
+        ),
+        filter=FilterConfig(enabled=False, order=400),
+        window=WindowConfig(enabled=False, beta=(150.0, 50.0), freq=True, range=True),
+        caf=CAFConfig(batch=500),
         cfar=CFARConfig(
-            enabled=True, Nw=128, Ng=8, P_fa=1e-5, return_intermediate=True
+            enabled=True,
+            bidimensional=True,
+            Nw=1,
+            Ng=(64, 256),
+            P_fa=1e-5,
+            freq_wrap=True,
         ),
         plot=PlotConfig(
-            show=show_figures,
-            save=save_figures,
+            show=False,
+            save=False,
             db=True,
             cmap="viridis",
             aspect="auto",
-            xlim=(-10.0, 10.0),
-            ylim=(1000.0, 0.0),
+            xlim=(-4.2, 4.2),
+            ylim=(18400, 0.0),
         ),
     )
 

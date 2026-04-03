@@ -28,6 +28,7 @@ np.random.seed(47)
 
 def build_config(
     cfar: tuple[int, tuple[int, int]] = (1, (64, 256)),
+    beta: tuple[float, float] = (150.0, 50.0),
 ) -> PassiveRadarChainConfig:
     """Build a configuration that closely matches the uploaded notebook."""
     return PassiveRadarChainConfig(
@@ -58,8 +59,8 @@ def build_config(
             noise_on_both_channels=True,
             noise_power_db=1,
         ),
-        filter=FilterConfig(enabled=False, order=400),
-        window=WindowConfig(enabled=False, beta=(150.0, 50.0), freq=True, range=True),
+        filter=FilterConfig(enabled=True, order=400),
+        window=WindowConfig(enabled=True, beta=beta, freq=True, range=True),
         caf=CAFConfig(batch=500),
         cfar=CFARConfig(
             enabled=True,
@@ -81,10 +82,12 @@ def build_config(
     )
 
 
-def main(remod, beta, cfar=None) -> None:
+def main(remod, pass_parameters, beta, cfar) -> None:
     REMOD_TITLE = "_remod" if remod else "_no_remod"
-    if cfar is not None:
-        chain = PassiveRadarChain(config=build_config(cfar=cfar), verbose=True)
+    if pass_parameters:
+        chain = PassiveRadarChain(
+            config=build_config(cfar=cfar, beta=beta), verbose=True
+        )
     else:
         chain = PassiveRadarChain(config=build_config(), verbose=True)
 
@@ -98,25 +101,7 @@ def main(remod, beta, cfar=None) -> None:
             noise_power_db=N_o_in,
         )
         chain.simulate_inputs(isdbt)
-    chain.plot_scenario_geometry()
-    chain.run(start_from="channel", stop_at="caf")
-    chain.plot_caf(filename=f"caf{REMOD_TITLE}.png", title="CAF")
-
-    chain.update_filter_config(enabled=True)
-    chain.run_from("filter")
-    chain.plot_caf(
-        filename=f"filtered_caf{REMOD_TITLE}.png",
-        title="CAF (CF)",
-    )
-
-    chain.update_window_config(enabled=True, beta=beta)
-    chain.run_from("window")
-    chain.plot_caf(
-        filename=f"filtered_w_caf{REMOD_TITLE}.png",
-        title="CAF (CF + Ventanas)",
-    )
-
-    chain.run_detection()
+    chain.run_from("channel")
     chain.plot_detections(
         filename=f"filtered_w_detections{REMOD_TITLE}.png",
         title="Detecciones CAF (CF + Ventanas) ",
@@ -125,4 +110,4 @@ def main(remod, beta, cfar=None) -> None:
 
 
 if __name__ == "__main__":
-    main(True, (200.0, 100.0), (1, (254, 600)))
+    main(True, True, (200.0, 100.0), (1, (254, 600)))
