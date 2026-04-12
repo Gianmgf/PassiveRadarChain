@@ -92,6 +92,8 @@ class SimulationState:
     doppler_hz: float | None = None
     clutter_positions: np.ndarray | None = None
     target_position: np.ndarray | None = None
+    radar_position: np.ndarray | None = None
+    transmitter_position: np.ndarray | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -707,6 +709,12 @@ class PassiveRadarChain:
             doppler_hz=float(doppler_hz) if doppler_hz is not None else None,
             clutter_positions=clutter_positions,
             target_position=target_position,
+            radar_position=np.asarray(
+                self.config.simulation.radar_position, dtype=float
+            ),
+            transmitter_position=np.asarray(
+                self.config.simulation.transmitter_position, dtype=float
+            ),
             metadata={
                 "transmitter_position": np.asarray(
                     self.config.simulation.transmitter_position

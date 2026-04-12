@@ -13,17 +13,17 @@ FIG_DIR = BASE_DIR.parent / "simulated_data" / "figures"
 FIG_SIZE = (9, 6)
 
 
-def main(confs, states) -> None:
+def graph(confs_remod, confs_noremod, states_remod, states_noremod, save=False) -> None:
 
     chain_remod = PassiveRadarChain.from_config_file(
-        CONFIG_DIR / confs[0], verbose=True
+        CONFIG_DIR / confs_remod, verbose=True
     )
     chain_no_remod = PassiveRadarChain.from_config_file(
-        CONFIG_DIR / confs[1], verbose=True
+        CONFIG_DIR / confs_noremod, verbose=True
     )
 
-    chain_remod.load_state(STATE_DIR / states[0])
-    chain_no_remod.load_state(STATE_DIR / states[1])
+    chain_remod.load_state(STATE_DIR / states_remod)
+    chain_no_remod.load_state(STATE_DIR / states_noremod)
 
     caf_state_remod = chain_remod.get_state("caf")
     detection_state_remod = chain_remod.get_state("detection")
@@ -39,7 +39,6 @@ def main(confs, states) -> None:
     ax1.set_xlabel("Doppler [ kHz ]")
     ax1.set_ylabel("Rango [ m ]")
     ax1.set_title(r"CA-CFAR $\hat{\sigma}$ [ m, k]")
-    fig1.savefig(FIG_DIR / "sigma_est_no_remod.png", dpi=300, bbox_inches="tight")
 
     rows, cols = detection_state_no_remod.detections
     detected_values = np.abs(caf_state_no_remod.caf[rows, cols])
@@ -91,8 +90,6 @@ def main(confs, states) -> None:
     ax2[0].yaxis.set_major_locator(MaxNLocator(nbins=20))
     ax2[1].yaxis.set_major_locator(MaxNLocator(nbins=20))
 
-    fig2.savefig(FIG_DIR / "cortes_rf_no_remod.png", dpi=300, bbox_inches="tight")
-
     fig3, ax3 = utils.plot_caf(
         detection_state_remod.sigma_est,
         caf_state_remod.extent,
@@ -101,7 +98,6 @@ def main(confs, states) -> None:
     ax3.set_title(r"CA-CFAR $\hat{\sigma}$ [ m, k]")
     ax3.set_xlabel("Doppler [kHz]")
     ax3.set_ylabel("Rango [m]")
-    fig3.savefig(FIG_DIR / "sigma_est_remod.png", dpi=300, bbox_inches="tight")
 
     rows, cols = detection_state_remod.detections
     detected_values = np.abs(caf_state_remod.caf[rows, cols])
@@ -153,8 +149,6 @@ def main(confs, states) -> None:
     ax4[0].yaxis.set_major_locator(MaxNLocator(nbins=20))
     ax4[1].yaxis.set_major_locator(MaxNLocator(nbins=20))
 
-    fig4.savefig(FIG_DIR / "cortes_rf_remod.png", dpi=300, bbox_inches="tight")
-
     rows, cols = detection_state_no_remod.detections
     detected_values = np.abs(caf_state_no_remod.caf[rows, cols])
     max_detection_idx = np.argmax(detected_values)
@@ -200,18 +194,26 @@ def main(confs, states) -> None:
             collection.set_label("_nolegend_")
 
     lineas_freq = ax5[0].lines
-    lineas_freq[0].set_label(f"CAF remod (pico: {max_peak_cut_remod_db:.2f} dB)")
-    lineas_freq[1].set_label(r"$\hat{\sigma}$ remod")
-    lineas_freq[2].set_label(f"CAF no remod (pico: {max_peak_cut_no_remod_db:.2f} dB)")
-    lineas_freq[3].set_label(r"$\hat{\sigma}$ no remod")
+    lineas_freq[0].set_label(
+        f"CAF reconstrucción (pico: {max_peak_cut_remod_db:.2f} dB)"
+    )
+    lineas_freq[1].set_label(r"$\hat{\sigma}$ reconstrucción")
+    lineas_freq[2].set_label(
+        f"CAF no reconstrucción (pico: {max_peak_cut_no_remod_db:.2f} dB)"
+    )
+    lineas_freq[3].set_label(r"$\hat{\sigma}$ no reconstrucción")
     lineas_freq[2].set_linestyle("--")
     lineas_freq[3].set_linestyle("--")
 
     lineas_range = ax5[1].lines
-    lineas_range[0].set_label(f"CAF remod (pico: {max_peak_cut_remod_db:.2f} dB)")
-    lineas_range[1].set_label(r"$\hat{\sigma}$ remod")
-    lineas_range[2].set_label(f"CAF no remod (pico: {max_peak_cut_no_remod_db:.2f} dB)")
-    lineas_range[3].set_label(r"$\hat{\sigma}$ no remod")
+    lineas_range[0].set_label(
+        f"CAF reconstrucción (pico: {max_peak_cut_remod_db:.2f} dB)"
+    )
+    lineas_range[1].set_label(r"$\hat{\sigma}$ reconstrucción")
+    lineas_range[2].set_label(
+        f"CAF no reconstrucción (pico: {max_peak_cut_no_remod_db:.2f} dB)"
+    )
+    lineas_range[3].set_label(r"$\hat{\sigma}$ no reconstrucción")
     lineas_range[2].set_linestyle("--")
     lineas_range[3].set_linestyle("--")
 
@@ -229,10 +231,6 @@ def main(confs, states) -> None:
     ax5[1].yaxis.set_major_locator(MaxNLocator(nbins=20))
 
     plt.tight_layout()
-    plt.show()
-    fig5.savefig(
-        FIG_DIR / "cortes_rf_remod_vs_noremod.png", dpi=300, bbox_inches="tight"
-    )
 
     noise_power_noremod = np.mean(np.abs(detection_state_no_remod.sigma_est) ** 2)
     noise_power_remod = np.mean(np.abs(detection_state_remod.sigma_est) ** 2)
@@ -240,11 +238,20 @@ def main(confs, states) -> None:
     noise_dif = utils.to_db(noise_power_noremod) - utils.to_db(noise_power_remod)
 
     print(noise_dif)
-    x = chain_no_remod.get_state("channel").reference_ch
-    x = np.asarray(x, dtype=np.complex64)
+    # x = chain_no_remod.get_state("channel").reference_ch
+    # x = np.asarray(x, dtype=np.complex64)
 
-    x.tofile(BASE_DIR.parent / "data" / "senal_complex64.bin")
+    # x.tofile(BASE_DIR.parent / "data" / "senal_complex64.bin")
+    if save:
+        fig1.savefig(FIG_DIR / "sigma_est_no_remod.png", dpi=300, bbox_inches="tight")
+        fig2.savefig(FIG_DIR / "cortes_rf_no_remod.png", dpi=300, bbox_inches="tight")
+        fig3.savefig(FIG_DIR / "sigma_est_remod.png", dpi=300, bbox_inches="tight")
+        fig4.savefig(FIG_DIR / "cortes_rf_remod.png", dpi=300, bbox_inches="tight")
+        fig5.savefig(
+            FIG_DIR / "cortes_rf_remod_vs_noremod.png", dpi=300, bbox_inches="tight"
+        )
 
 
 if __name__ == "__main__":
-    main(("config_600.json", "config_601.json"), ("state_600.json", "state_601.json"))
+    graph("config_600.json", "config_601.json", "state_600.npz", "state_601.npz")
+    plt.show()

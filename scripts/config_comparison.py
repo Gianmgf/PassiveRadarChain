@@ -17,6 +17,7 @@ from pr_chain.core.configs import (
     WindowConfig,
     ChannelConfig,
 )
+from graphs import graph
 
 N_SAMPELS = 1_000_000
 INCLUDE_ISDBT = True
@@ -29,6 +30,7 @@ np.random.seed(47)
 def build_config(
     cfar: tuple[int, tuple[int, int]] = (1, (64, 256)),
     beta: tuple[float, float] = (150.0, 50.0),
+    save: bool = False,
 ) -> PassiveRadarChainConfig:
     """Build a configuration that closely matches the uploaded notebook."""
     return PassiveRadarChainConfig(
@@ -59,8 +61,8 @@ def build_config(
             noise_on_both_channels=True,
             noise_power_db=1,
         ),
-        filter=FilterConfig(enabled=True, order=400),
-        window=WindowConfig(enabled=True, beta=beta, freq=True, range=True),
+        filter=FilterConfig(enabled=False, order=400),
+        window=WindowConfig(enabled=False, beta=beta, freq=True, range=True),
         caf=CAFConfig(batch=500),
         cfar=CFARConfig(
             enabled=True,
@@ -72,7 +74,7 @@ def build_config(
         ),
         plot=PlotConfig(
             show=False,
-            save=False,
+            save=save,
             db=True,
             cmap="viridis",
             aspect="auto",
@@ -82,11 +84,12 @@ def build_config(
     )
 
 
-def main(remod, pass_parameters, beta, cfar) -> None:
+def main(remod, pass_parameters, beta, cfar, save=False) -> None:
     REMOD_TITLE = "_remod" if remod else "_no_remod"
+    RECONSTRUCTOR_TITLE = "con reconstrucción" if remod else "sin reconstrucción"
     if pass_parameters:
         chain = PassiveRadarChain(
-            config=build_config(cfar=cfar, beta=beta), verbose=True
+            config=build_config(cfar=cfar, beta=beta, save=save), verbose=True
         )
     else:
         chain = PassiveRadarChain(config=build_config(), verbose=True)
@@ -101,13 +104,64 @@ def main(remod, pass_parameters, beta, cfar) -> None:
             noise_power_db=N_o_in,
         )
         chain.simulate_inputs(isdbt)
-    chain.run_from("channel")
+    # CAF Sin Filtro CF ni ventanas
+    chain.run(start_from="channel", stop_at="caf")
+
+    chain.plot_caf(
+        filename=f"caf{REMOD_TITLE}.png",
+        title=f"CAF {RECONSTRUCTOR_TITLE}",
+    )
+
+    # CAF con Filtro CF y sin ventanas
+    chain.update_filter_config(enabled=True)
+    chain.run(start_from="filter", stop_at="caf")
+    chain.plot_caf(
+        filename=f"filtered_caf{REMOD_TITLE}.png",
+        title=f"CAF {RECONSTRUCTOR_TITLE} (CF)",
+    )
+
+    # CAF con Filtro CF y ventanas
+    chain.update_window_config(enabled=True)
+    chain.run(start_from="window", stop_at="detect")
+    chain.plot_caf(
+        filename=f"filtered_w_caf{REMOD_TITLE}.png",
+        title=f"CAF {RECONSTRUCTOR_TITLE} (CF + Ventanas)",
+    )
+
     chain.plot_detections(
         filename=f"filtered_w_detections{REMOD_TITLE}.png",
-        title="Detecciones CAF (CF + Ventanas) ",
+        title=f"Detecciones CAF {RECONSTRUCTOR_TITLE} (CF + Ventanas) ",
     )
-    plt.show()
+    chain.save_config(filename=f"config{REMOD_TITLE}")
+    chain.save_state(filename=f"state{REMOD_TITLE}")
+    sim = chain.peek_state("simulation")
+    target_p = sim.target_position
+    target_doppler = sim.doppler_hz
+    radar_p = sim.radar_position
+    tx_p = sim.transmitter_position
+    target_range = (
+        np.linalg.norm(target_p - radar_p)
+        + np.linalg.norm(target_p - tx_p)
+        - np.linalg.norm(radar_p - tx_p)
+    )
+    caf_state = chain.peek_state("caf")
+    r = caf_state.range_axis
+    f = caf_state.freq_axis
+    print(
+        f"True:\n\tTarget Doppler: {target_doppler:.2f} \tTarget Range: {target_range:.2f}"
+    )
+    print(f"Detected:\n\tTarget Doppler: {f[1003]:.2f} \tTarget Range: {r[121]:.2f}")
 
 
 if __name__ == "__main__":
-    main(True, True, (200.0, 100.0), (1, (254, 600)))
+    main(True, True, (200.0, 100.0), (1, (254, 600)), True)
+    main(False, True, (200.0, 100.0), (1, (254, 600)), True)
+    graph(
+        "config_remod.json",
+        "config_no_remod.json",
+        "state_remod.npz",
+        "state_no_remod.npz",
+        True,
+    )
+
+    plt.show()
