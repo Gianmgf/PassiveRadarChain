@@ -106,8 +106,8 @@ class EchoGenerator:
             - np.linalg.norm(self.Tx_position - self.Rx_position)
         )
 
-        self.target_sample_delay = target_range * fs / C
-        self.target_sample_delay = self.target_sample_delay.astype(int)
+        self.target_sample_delay = np.ceil(target_range * fs / C)
+        self.target_sample_delay = int(self.target_sample_delay)
 
     def generate(self, reference_signal: np.ndarray) -> np.ndarray:
         """

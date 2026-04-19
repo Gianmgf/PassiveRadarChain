@@ -1007,6 +1007,8 @@ class PassiveRadarChain:
         ----------
         stage : str | None
             Nombre de la etapa. Si es None, devuelve el estado completo.
+            Stages:
+            inputs, simulation, channel, filter, window, caf, detection
         copy_state : bool, optional
             Si es True devuelve una copia profunda del estado solicitado.
             Si es False devuelve una referencia directa al estado interno.

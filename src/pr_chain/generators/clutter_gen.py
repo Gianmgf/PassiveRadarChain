@@ -110,7 +110,7 @@ class ClutterGenerator:
             - np.linalg.norm(self.Tx_position - self.Rx_position)
         )
 
-        self.clutter_sample_delays = clutter_range * fs / C
+        self.clutter_sample_delays = np.ceil(clutter_range * fs / C)
 
         self.clutter_sample_delays = self.clutter_sample_delays.astype(int)
 

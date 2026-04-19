@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from pr_chain import PassiveRadarChain
+from matplotlib.ticker import MaxNLocator
 from pr_chain import utils
 from pr_chain.core.configs import (
     CAFConfig,
@@ -24,6 +25,7 @@ INCLUDE_ISDBT = True
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR.parent / "data"
+FIG_DIR = BASE_DIR.parent / "simulated_data" / "figures"
 np.random.seed(47)
 
 
@@ -35,7 +37,7 @@ def build_config(
     """Build a configuration that closely matches the uploaded notebook."""
     return PassiveRadarChainConfig(
         input=InputConfig(
-            N=N_SAMPELS, fs=8126984.0, f_c=700e6, use_simulated_data=True
+            N=N_SAMPELS, fs=8126984.0, f_c=700e6, use_simulated_data=False
         ),
         simulation=SimulationConfig(
             transmitter_position=[0.0, 0.0],
@@ -51,13 +53,13 @@ def build_config(
             echo=EchoConfig(
                 V_b=[10.0, 100.0],
                 rand_target=False,
-                target_rcs_db=-15.0,
+                target_rcs_db=-19.0,
                 target_position=[2500.0, 120.0],
             ),
         ),
         channel=ChannelConfig(
-            enable=True,
-            add_noise=True,
+            enable=False,
+            add_noise=False,
             noise_on_both_channels=True,
             noise_power_db=1,
         ),
@@ -84,7 +86,7 @@ def build_config(
     )
 
 
-def main(remod, pass_parameters, beta, cfar, save=False) -> None:
+def run_config(remod, pass_parameters, beta, cfar, save=False) -> None:
     REMOD_TITLE = "_remod" if remod else "_no_remod"
     RECONSTRUCTOR_TITLE = "con reconstrucción" if remod else "sin reconstrucción"
     if pass_parameters:
@@ -94,18 +96,24 @@ def main(remod, pass_parameters, beta, cfar, save=False) -> None:
     else:
         chain = PassiveRadarChain(config=build_config(), verbose=True)
 
-    if INCLUDE_ISDBT:
-        isdbt = np.load(DATA_DIR / "isdbt_signal.npy")
-        isdbt = isdbt[0:N_SAMPELS]
-        E = np.mean(np.abs(isdbt) ** 2)
-        N_o_in = utils.math.to_db(E / utils.math.from_db(12))
-        chain.update_channel_config(
-            noise_on_both_channels=not remod,
-            noise_power_db=N_o_in,
-        )
-        chain.simulate_inputs(isdbt)
+    signals = np.load(DATA_DIR / "pr_signals" / "signals.npz")
+    
+    surv = signals['surv']
+    if remod:
+        ref = signals['remod']
+    else:
+        ref = signals['noisy']
+
+    fig1, ax1 = plt.subplots()
+    utils.plot_psd(x= ref, fs= 8126984.0, ax=ax1, n_samples=N_SAMPELS, freq_in_khz=True)
+    ax1.yaxis.set_major_locator(MaxNLocator(nbins=15))
+    ax1.set_title(f"Señal de referencia {RECONSTRUCTOR_TITLE}")
+    if save:
+        fig1.savefig(FIG_DIR / f"ref{REMOD_TITLE}.png", dpi=300, bbox_inches="tight")
+        
+    chain.set_inputs(reference= ref, surveillance= surv)
     # CAF Sin Filtro CF ni ventanas
-    chain.run(start_from="channel", stop_at="caf")
+    chain.run_until(stage="caf")
 
     chain.plot_caf(
         filename=f"caf{REMOD_TITLE}.png",
@@ -134,28 +142,13 @@ def main(remod, pass_parameters, beta, cfar, save=False) -> None:
     )
     chain.save_config(filename=f"config{REMOD_TITLE}")
     chain.save_state(filename=f"state{REMOD_TITLE}")
-    sim = chain.peek_state("simulation")
-    target_p = sim.target_position
-    target_doppler = sim.doppler_hz
-    radar_p = sim.radar_position
-    tx_p = sim.transmitter_position
-    target_range = (
-        np.linalg.norm(target_p - radar_p)
-        + np.linalg.norm(target_p - tx_p)
-        - np.linalg.norm(radar_p - tx_p)
-    )
-    caf_state = chain.peek_state("caf")
-    r = caf_state.range_axis
-    f = caf_state.freq_axis
-    print(
-        f"True:\n\tTarget Doppler: {target_doppler:.2f} \tTarget Range: {target_range:.2f}"
-    )
-    print(f"Detected:\n\tTarget Doppler: {f[1003]:.2f} \tTarget Range: {r[121]:.2f}")
+
+
 
 
 if __name__ == "__main__":
-    main(True, True, (200.0, 100.0), (1, (254, 600)), True)
-    main(False, True, (200.0, 100.0), (1, (254, 600)), True)
+    run_config(True, True, (200.0, 100.0), (1, (254, 600)), True)
+    run_config(False, True, (200.0, 100.0), (1, (254, 600)), True)
     graph(
         "config_remod.json",
         "config_no_remod.json",

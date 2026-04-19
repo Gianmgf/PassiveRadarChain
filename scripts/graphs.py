@@ -41,11 +41,22 @@ def graph(confs_remod, confs_noremod, states_remod, states_noremod, save=False) 
     ax1.set_title(r"CA-CFAR $\hat{\sigma}$ [ m, k]")
 
     rows, cols = detection_state_no_remod.detections
-    detected_values = np.abs(caf_state_no_remod.caf[rows, cols])
-    max_detection_idx = np.argmax(detected_values)
+    # detected_values = np.abs(caf_state_no_remod.caf[rows, cols])
+    # max_detection_idx = np.argmax(detected_values)
 
-    r_idx = rows[max_detection_idx]
-    f_idx = cols[max_detection_idx]
+    # r_idx = rows[max_detection_idx]
+    # f_idx = cols[max_detection_idx]
+    rows, cols = detection_state_no_remod.detections
+
+    if len(rows) == 0 or len(cols) == 0:
+        r_idx = 121
+        f_idx = 1003
+    else:
+        detected_values = np.abs(caf_state_no_remod.caf[rows, cols])
+        max_detection_idx = np.argmax(detected_values)
+
+        r_idx = rows[max_detection_idx]
+        f_idx = cols[max_detection_idx]
 
     max_peak_cut_db = utils.math.to_db(np.abs(caf_state_no_remod.caf[r_idx, f_idx]))
 
@@ -170,6 +181,7 @@ def graph(confs_remod, confs_noremod, states_remod, states_noremod, save=False) 
         f_idx=f_idx,
         r_idx=r_idx,
         sigma_est=detection_state_remod.sigma_est,
+        alpha_est=detection_state_remod.alpha_det,
         plot_sigma=True,
         plot_umbral=False,
         en_db=True,
@@ -183,6 +195,7 @@ def graph(confs_remod, confs_noremod, states_remod, states_noremod, save=False) 
         f_idx=f_idx,
         r_idx=r_idx,
         sigma_est=detection_state_no_remod.sigma_est,
+        alpha_est=detection_state_no_remod.alpha_det,
         plot_sigma=True,
         plot_umbral=False,
         en_db=True,
@@ -229,19 +242,17 @@ def graph(confs_remod, confs_noremod, states_remod, states_noremod, save=False) 
 
     ax5[0].yaxis.set_major_locator(MaxNLocator(nbins=20))
     ax5[1].yaxis.set_major_locator(MaxNLocator(nbins=20))
-
+    ax5[0].legend(loc="lower left")
+    ax5[1].legend(loc="lower left")
     plt.tight_layout()
 
-    noise_power_noremod = np.mean(np.abs(detection_state_no_remod.sigma_est) ** 2)
-    noise_power_remod = np.mean(np.abs(detection_state_remod.sigma_est) ** 2)
+    noise_power_noremod = np.mean(detection_state_no_remod.sigma_est[r_idx,:])
+    noise_power_remod = np.mean(detection_state_remod.sigma_est[r_idx,:])
 
     noise_dif = utils.to_db(noise_power_noremod) - utils.to_db(noise_power_remod)
 
-    print(noise_dif)
-    # x = chain_no_remod.get_state("channel").reference_ch
-    # x = np.asarray(x, dtype=np.complex64)
+    print(f"Noise difference (E[sigma_hat_no_remod] - E[sigma_hat_remod])[dB] = {noise_dif} ")
 
-    # x.tofile(BASE_DIR.parent / "data" / "senal_complex64.bin")
     if save:
         fig1.savefig(FIG_DIR / "sigma_est_no_remod.png", dpi=300, bbox_inches="tight")
         fig2.savefig(FIG_DIR / "cortes_rf_no_remod.png", dpi=300, bbox_inches="tight")
@@ -253,5 +264,5 @@ def graph(confs_remod, confs_noremod, states_remod, states_noremod, save=False) 
 
 
 if __name__ == "__main__":
-    graph("config_600.json", "config_601.json", "state_600.npz", "state_601.npz")
+    graph("config_remod.json", "config_no_remod.json", "state_remod.npz", "state_no_remod.npz")
     plt.show()
