@@ -22,8 +22,8 @@ def test_full_chain(gen_isdtb_signals:bool = False):
     reference_remod = np.fromfile(DATA_DIR / "gr_files" / "isdbt_remod.cfile", dtype=np.complex64)
     E = np.mean(np.abs(reference) ** 2)
 
-    snr = 16
-    noisy_ref, surv, fd, target_p = gen_signals(snr, reference)
+    snr = 15
+    noisy_ref, surv, fd, target_p = gen_signals(snr_db = snr, reference= reference, echo_power_db= -30.0, samples=N_SAMPLES)
     
 
     np.savez(
@@ -40,8 +40,8 @@ def test_full_chain(gen_isdtb_signals:bool = False):
         subprocess.run([sys.executable, DATA_DIR/"gr_files"/"tx_tesis_remod.py"])
     
 
-    run_config(remod= True, pass_parameters= True, beta=(170.0, 20.0), cfar=(1, (128, 512)), save= True)
-    run_config(remod= False, pass_parameters= True, beta=(170.0, 20.0), cfar=(1, (128,512)), save= True)
+    run_config(remod= True, pass_parameters= True, beta=(40.0, 20.0), cfar=(1, (128, 512)),samples=N_SAMPLES, save= True)
+    run_config(remod= False, pass_parameters= True, beta=(40.0, 20.0), cfar=(1, (128,512)),samples=N_SAMPLES, save= True)
     graph(
         "config_remod.json",
         "config_no_remod.json",
@@ -52,7 +52,7 @@ def test_full_chain(gen_isdtb_signals:bool = False):
 
 
 if __name__ == "__main__":
-    test_full_chain(False)
+    test_full_chain(True)
     plt.show()
 
     

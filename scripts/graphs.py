@@ -49,7 +49,7 @@ def graph(confs_remod, confs_noremod, states_remod, states_noremod, save=False) 
     rows, cols = detection_state_no_remod.detections
 
     if len(rows) == 0 or len(cols) == 0:
-        r_idx = 121
+        r_idx = 122
         f_idx = 1003
     else:
         detected_values = np.abs(caf_state_no_remod.caf[rows, cols])
@@ -162,10 +162,16 @@ def graph(confs_remod, confs_noremod, states_remod, states_noremod, save=False) 
 
     rows, cols = detection_state_no_remod.detections
     detected_values = np.abs(caf_state_no_remod.caf[rows, cols])
-    max_detection_idx = np.argmax(detected_values)
+    if len(rows) == 0 or len(cols) == 0:
+        r_idx = 122
+        f_idx = 1003
+    else:
+        detected_values = np.abs(caf_state_no_remod.caf[rows, cols])
+        max_detection_idx = np.argmax(detected_values)
 
-    r_idx = rows[max_detection_idx]
-    f_idx = cols[max_detection_idx]
+        r_idx = rows[max_detection_idx]
+        f_idx = cols[max_detection_idx]
+ 
 
     max_peak_cut_no_remod_db = utils.math.to_db(
         np.abs(caf_state_no_remod.caf[r_idx, f_idx])

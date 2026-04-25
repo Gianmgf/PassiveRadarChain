@@ -238,8 +238,10 @@ class PlotConfig:
     figsize: tuple[float, float] = (9, 6)
     cmap: str = "viridis"
     aspect: str = "auto"
-    xlim: tuple[float, float] | None = (-10.0, 10.0)
-    ylim: tuple[float, float] | None = (1000.0, 0.0)
+
+    xlim: tuple[float, float] | None = None
+    ylim: tuple[float, float] | None = None
+
     marker: str = "o"
     color: str = "r"
     markersize: int = 8
@@ -252,7 +254,6 @@ class PlotConfig:
             self.xlim = tuple(self.xlim)
         if isinstance(self.ylim, list):
             self.ylim = tuple(self.ylim)
-
 
 @dataclass
 class IOConfig:
