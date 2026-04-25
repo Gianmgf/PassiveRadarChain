@@ -16,7 +16,7 @@ DATA_DIR = BASE_DIR.parent / "data"
 N_SAMPLES = 1_000_000
 np.random.seed(47)
 
-def gen_signals(snr_db, reference):
+def gen_signals(snr_db, reference, echo_power_db, samples=N_SAMPLES):
     N = len(reference)
     E_ref = np.mean(np.abs(reference) ** 2)
     noise_power = E_ref / utils.from_db(snr_db)
@@ -32,7 +32,7 @@ def gen_signals(snr_db, reference):
 
     pr_config = PassiveRadarChainConfig(
         input=InputConfig(
-            N=N_SAMPLES, fs=8126984.0, f_c=700e6, use_simulated_data=True
+            N=samples, fs=8126984.0, f_c=700e6, use_simulated_data=True
         ),
         simulation=SimulationConfig(
             transmitter_position=[0.0, 0.0],
@@ -48,7 +48,7 @@ def gen_signals(snr_db, reference):
             echo=EchoConfig(
                 V_b=[10.0, 100.0],
                 rand_target=False,
-                target_rcs_db=-18.0,
+                target_rcs_db=echo_power_db,
                 target_position=[2500.0, 120.0],
             ),
         ),
@@ -58,12 +58,12 @@ def gen_signals(snr_db, reference):
     
     noise = (
         np.sqrt(noise_power)
-        * (np.random.randn(N_SAMPLES) + 1j * np.random.randn(N_SAMPLES))
+        * (np.random.randn(samples) + 1j * np.random.randn(samples))
     )
 
     
     pr_chain = PassiveRadarChain(pr_config)
-    pr_chain.simulate_inputs(reference[:N_SAMPLES])
+    pr_chain.simulate_inputs(reference[:samples])
     
     
     input_state= pr_chain.get_state(stage= "inputs", copy_state=False)
@@ -72,7 +72,7 @@ def gen_signals(snr_db, reference):
     surv = input_state.surveillance + noise
     fd, target_p = sim_state.doppler_hz, sim_state.target_position
 
-    return noisy_ref[0:N_SAMPLES], surv, fd, target_p
+    return noisy_ref[0:samples], surv, fd, target_p
 
 
 

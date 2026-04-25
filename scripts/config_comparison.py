@@ -32,12 +32,13 @@ np.random.seed(47)
 def build_config(
     cfar: tuple[int, tuple[int, int]] = (1, (64, 256)),
     beta: tuple[float, float] = (150.0, 50.0),
+    samples: int = N_SAMPELS,
     save: bool = False,
 ) -> PassiveRadarChainConfig:
     """Build a configuration that closely matches the uploaded notebook."""
     return PassiveRadarChainConfig(
         input=InputConfig(
-            N=N_SAMPELS, fs=8126984.0, f_c=700e6, use_simulated_data=False
+            N=samples, fs=8126984.0, f_c=700e6, use_simulated_data=False
         ),
         simulation=SimulationConfig(
             transmitter_position=[0.0, 0.0],
@@ -53,7 +54,7 @@ def build_config(
             echo=EchoConfig(
                 V_b=[10.0, 100.0],
                 rand_target=False,
-                target_rcs_db=-19.0,
+                target_rcs_db=-36.0,
                 target_position=[2500.0, 120.0],
             ),
         ),
@@ -80,18 +81,16 @@ def build_config(
             db=True,
             cmap="viridis",
             aspect="auto",
-            xlim=(-4.2, 4.2),
-            ylim=(18400, 0.0),
         ),
     )
 
 
-def run_config(remod, pass_parameters, beta, cfar, save=False) -> None:
+def run_config(remod, pass_parameters, beta, cfar, samples=N_SAMPELS, save=False) -> None:
     REMOD_TITLE = "_remod" if remod else "_no_remod"
     RECONSTRUCTOR_TITLE = "con reconstrucción" if remod else "sin reconstrucción"
     if pass_parameters:
         chain = PassiveRadarChain(
-            config=build_config(cfar=cfar, beta=beta, save=save), verbose=True
+            config=build_config(cfar=cfar, beta=beta,samples=samples, save=save), verbose=True
         )
     else:
         chain = PassiveRadarChain(config=build_config(), verbose=True)
@@ -114,7 +113,6 @@ def run_config(remod, pass_parameters, beta, cfar, save=False) -> None:
     chain.set_inputs(reference= ref, surveillance= surv)
     # CAF Sin Filtro CF ni ventanas
     chain.run_until(stage="caf")
-
     chain.plot_caf(
         filename=f"caf{REMOD_TITLE}.png",
         title=f"CAF {RECONSTRUCTOR_TITLE}",
@@ -142,6 +140,7 @@ def run_config(remod, pass_parameters, beta, cfar, save=False) -> None:
     )
     chain.save_config(filename=f"config{REMOD_TITLE}")
     chain.save_state(filename=f"state{REMOD_TITLE}")
+    
 
 
 
